@@ -8,12 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const createAgentsTable = `CREATE TABLE IF NOT EXISTS agents (
-	name STRING PRIMARY KEY,
-	base_url STRING NOT NULL,
-	query_formatter STRING DEFAULT '%s&q=%s'
-);`
-
 type Agent struct {
 	Name           string
 	baseURL        string

@@ -1,8 +1,7 @@
 {
     "RSSPeriod": "30s",
     "HistoryLength": 1000,
-    "DownloadDirectory": "/tmp",
-    "InitDemo": true,
+    "DownloadDirectory": "/files",
     "ConnectionString": "postgres://root@localhost:26257/postgres?sslmode=disable",
     "DiscordToken": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 }

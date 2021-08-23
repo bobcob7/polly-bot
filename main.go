@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"flag"
+	"fmt"
 	"time"
 
 	"github.com/bobcob7/polly-bot/internal"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +20,40 @@ var logger *zap.Logger
 func init() {
 	flag.StringVar(&configFilename, "config", "", "File to the configuration file")
 	logger, _ = zap.NewProduction()
+}
+
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+type Logger struct {
+	*zap.Logger
+}
+
+func (l Logger) Printf(format string, values ...interface{}) {
+	l.Info(fmt.Sprintf(format, values...))
+}
+
+func (l Logger) Verbose() bool {
+	return true
+}
+
+func InitDB(dbURL string) error {
+	logger.Info("Initializing database connection")
+
+	d, err := iofs.New(migrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create migrations: %w", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", d, dbURL)
+	if err != nil {
+		return fmt.Errorf("failed to create migration instance: %w", err)
+	}
+	m.Log = Logger{logger}
+	err = m.Up()
+	if err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -42,10 +80,9 @@ func main() {
 		)
 	}
 	logger.Info("Opened database connection")
-	err = internal.InitDB(db, conf.InitDemo)
+	err = InitDB(conf.ConnectionString)
 	if err != nil {
 		logger.Fatal("Failed to initialize database",
-			zap.Bool("initDemo", conf.InitDemo),
 			zap.Error(err),
 		)
 	}

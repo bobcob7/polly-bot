@@ -10,13 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const createSubjectsTable = `CREATE TABLE IF NOT EXISTS subjects (
-	name STRING PRIMARY KEY,
-	search_text STRING NOT NULL,
-	regex STRING,
-	agent_name STRING NOT NULL REFERENCES agents (name)
-);`
-
 type Subject struct {
 	Name       string
 	SearchText string

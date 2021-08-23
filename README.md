@@ -19,7 +19,6 @@ All settings can be adjusted from either a JSON configuration file like the incl
 | RSSPeriod | RSS_PERIOD | Duration between polling RSS feeds |
 | HistoryLength | HISTORY_LENGTH | Number of record that feed dedupper can hold |
 | DownloadDirectory | DOWNLOAD_DIR | Directory where all links will be downloaded to |
-| InitDemo | INIT_DEMO | Create example records in database when created |
 | ConnectionString | CONNECTION_STRING | Connection string to database |
 | DiscordToken | DISCORD_TOKEN | Token for discord bot |
 

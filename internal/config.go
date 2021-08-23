@@ -17,7 +17,6 @@ type Config struct {
 	RSSPeriod         string
 	HistoryLength     int
 	DownloadDirectory string
-	InitDemo          bool
 	DiscordToken      string
 }
 
@@ -98,12 +97,6 @@ func OpenConfig(filename string) (*Config, error) {
 	}
 	if v, ok := os.LookupEnv("DOWNLOAD_DIR"); ok {
 		newConfig.DownloadDirectory = v
-	}
-	if v, ok := os.LookupEnv("INIT_DEMO"); ok {
-		newConfig.InitDemo, err = strconv.ParseBool(v)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert INIT_DEMO to bool: %w", err)
-		}
 	}
 	if v, ok := os.LookupEnv("DISCORD_TOKEN"); ok {
 		newConfig.DiscordToken = v
