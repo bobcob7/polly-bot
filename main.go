@@ -2,110 +2,82 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"embed"
 	"flag"
 	"fmt"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/bobcob7/polly-bot/internal"
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/bobcob7/polly/pkg/discord"
+	"github.com/bobcob7/polly/pkg/transmission"
 	"go.uber.org/zap"
 )
 
-var configFilename string
-var logger *zap.Logger
+var tranmissionEndpoint string
+var showVersion bool
 
 func init() {
-	flag.StringVar(&configFilename, "config", "", "File to the configuration file")
-	logger, _ = zap.NewProduction()
-}
-
-//go:embed migrations/*.sql
-var migrations embed.FS
-
-type Logger struct {
-	*zap.Logger
-}
-
-func (l Logger) Printf(format string, values ...interface{}) {
-	l.Info(fmt.Sprintf(format, values...))
-}
-
-func (l Logger) Verbose() bool {
-	return true
-}
-
-func InitDB(dbURL string) error {
-	logger.Info("Initializing database connection")
-
-	d, err := iofs.New(migrations, "migrations")
+	logger, err := zap.NewDevelopment()
 	if err != nil {
-		return fmt.Errorf("failed to create migrations: %w", err)
+		panic(err)
 	}
-	m, err := migrate.NewWithSourceInstance("iofs", d, dbURL)
-	if err != nil {
-		return fmt.Errorf("failed to create migration instance: %w", err)
-	}
-	m.Log = Logger{logger}
-	err = m.Up()
-	if err != nil {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-	return nil
+	zap.ReplaceGlobals(logger)
+	flag.StringVar(&tranmissionEndpoint, "endpoint", "https://transmission.bobcob7.com", "URL where transmission RPC can be reached")
+	flag.BoolVar(&showVersion, "version", false, "Print current version and exit")
 }
 
 func main() {
-	defer logger.Sync()
 	flag.Parse()
+	if showVersion {
+		fmt.Println("0.0.1")
+		os.Exit(0)
+	}
+	// Authentication Token pulled from environment variable DGU_TOKEN
+	token := os.Getenv("TOKEN")
+	guildID := os.Getenv("GUILD")
+	if guildID == "" {
+		guilds, err := discord.GetGuilds(token)
+		if err != nil {
+			zap.L().Fatal("failed to get guilds", zap.Error(err))
+		}
+		for id, name := range guilds {
+			zap.L().Info("guild", zap.String("id", id), zap.String("name", name))
+		}
+		return
+	}
 	ctx, done := context.WithCancel(context.Background())
 	defer done()
-
-	// Open config
-	logger.Info("Opening config file",
-		zap.String("filename", configFilename),
+	// Start transmission interface
+	tr, err := transmission.New(ctx, tranmissionEndpoint)
+	if err != nil {
+		zap.L().Fatal("failed to connect to tranmission RPC server", zap.Error(err))
+	}
+	// Start discord interface
+	bot := discord.New(
+		&transmission.AddDownload{Transmission: tr},
+		&transmission.UnfinishedDownloads{Transmission: tr},
+		&transmission.SubscribeDownloads{Transmission: tr},
 	)
-	conf, err := internal.OpenConfig(configFilename)
-	if err != nil {
-		logger.Fatal("Failed to open config file",
-			zap.Error(err),
-		)
+	errChan := make(chan error, 1)
+	go func() {
+		defer close(errChan)
+		errChan <- bot.Run(ctx, token, guildID)
+	}()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	for {
+		select {
+		case err, ok := <-errChan:
+			if !ok {
+				// Exit since the error channel is closed
+				return
+			}
+			if err != nil {
+				zap.L().Error("Error running bot", zap.Error(err))
+			}
+		case <-stop:
+			zap.L().Info("Received interrupt, exiting")
+			done()
+		}
 	}
-	// Connect to DB
-	db, err := sql.Open("postgres", conf.ConnectionString)
-	if err != nil {
-		logger.Fatal("Failed to open database",
-			zap.Error(err),
-		)
-	}
-	logger.Info("Opened database connection")
-	err = InitDB(conf.ConnectionString)
-	if err != nil {
-		logger.Fatal("Failed to initialize database",
-			zap.Error(err),
-		)
-	}
-	// Create discord bot
-	logger.Info("Creating discord bot")
-	discord, err := internal.NewDiscordController(conf.DiscordToken)
-	if err != nil {
-		logger.Fatal("Failed to initialize discord bot",
-			zap.Error(err),
-		)
-	}
-	defer discord.Close()
-	go discord.Run(ctx, db)
-	// Create scanner components
-	history := internal.NewMemoryHistory(conf.HistoryLength)
-	downloader := internal.NewSingleDownloader(conf.DownloadDirectory)
-	// Assemble scanner
-	scanner := internal.NewScanner(history, downloader)
-
-	// Process subjects in loop
-	period, _ := time.ParseDuration(conf.RSSPeriod)
-
-	logger.Info("Running scanner")
-	scanner.Run(ctx, db, period)
 }
