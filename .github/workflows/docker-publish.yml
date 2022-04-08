@@ -34,9 +34,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-        
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
 
       - name: Log into registry
         if: github.event_name != 'pull_request'
