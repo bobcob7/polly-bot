@@ -13,14 +13,9 @@ on:
   pull_request:
     branches: [ master ]
 
-env:
-  # Use docker.io for Docker Hub if empty
-  REGISTRY: registry.bobcob7.com
-
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -33,7 +28,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: ${{ github.repository }}
+          images: registry.bobcob7.com/${{ github.repository }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
