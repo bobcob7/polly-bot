@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -45,29 +45,31 @@ jobs:
           file: ./build/Dockerfile
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=docker,dest=/tmp/image.tar
-      -
-        name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: image
-          path: /tmp/image.tar
+          push: ${{ github.event_name != 'pull_request' }}
+          # outputs: type=docker,dest=/tmp/image.tar
+      # -
+      #   name: Upload artifact
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: image
+      #     path: /tmp/image.tar
 
-  use:
-    runs-on: self-hosted
-    needs: build
-    steps:
-      -
-        name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      -
-        name: Download artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: image
-          path: /tmp
-      -
-        name: Load image
-        run: |
-          docker load --input /tmp/image.tar
-          docker image ls -a
+  # use:
+  #   runs-on: self-hosted
+  #   needs: build
+  #   steps:
+  #     -
+  #       name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v1
+  #     -
+  #       name: Download artifact
+  #       uses: actions/download-artifact@v2
+  #       with:
+  #         name: image
+  #         path: /tmp
+  #     -
+  #       name: Load image
+  #       run: |
+  #         docker load --input /tmp/image.tar
+  #         docker push 
+  #         docker image ls -a
