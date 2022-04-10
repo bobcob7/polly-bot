@@ -21,12 +21,22 @@ func (p *WhoAmI) Command() *discordgo.ApplicationCommand {
 }
 
 func (p *WhoAmI) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var user *discordgo.User
+	var roles []string
+	if i.User != nil {
+		user = i.User
+	} else if i.Member != nil && i.Member.User != nil {
+		user = i.Member.User
+		roles = i.Member.Roles
+	}
 	content := fmt.Sprintf(`ID:		%s
 Name:	%s
-Email:	%s`,
-		i.User.ID,
-		i.User.Username,
-		i.User.Email,
+Email:	%s
+Roles:	%v`,
+		user.ID,
+		user.Username,
+		user.Email,
+		roles,
 	)
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
