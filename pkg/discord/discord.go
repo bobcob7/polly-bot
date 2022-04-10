@@ -8,6 +8,7 @@ import (
 
 	"github.com/bobcob7/polly/pkg/discord/internal/echo"
 	"github.com/bobcob7/polly/pkg/discord/internal/ping"
+	"github.com/bobcob7/polly/pkg/discord/internal/whoami"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
@@ -32,6 +33,7 @@ func registerHandlers(commands ...Command) map[string]registeredCommand {
 	cmds := []Command{
 		&ping.Ping{},
 		&echo.Echo{},
+		&whoami.WhoAmI{},
 	}
 	cmds = append(cmds, commands...)
 	output := make(map[string]registeredCommand, len(cmds))
