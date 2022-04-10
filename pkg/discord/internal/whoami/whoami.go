@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
+	"go.uber.org/zap"
 )
 
 type WhoAmI struct{}
@@ -27,11 +28,13 @@ Email:	%s`,
 		i.User.Username,
 		i.User.Email,
 	)
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "Who Am I?",
 			Content: content,
 		},
-	})
+	}); err != nil {
+		zap.L().Error("failed to respond to interaction", zap.Error(err))
+	}
 }
