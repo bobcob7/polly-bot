@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var tranmissionEndpoint string
 var showVersion bool
 
 func init() {
@@ -61,7 +60,7 @@ func main() {
 	ctx, done := context.WithCancel(context.Background())
 	defer done()
 	// Start transmission interface
-	tr, err := transmission.New(ctx, tranmissionEndpoint)
+	tr, err := transmission.New(ctx, cfg.Transmission.Endpoint)
 	if err != nil {
 		zap.L().Fatal("failed to connect to tranmission RPC server", zap.Error(err))
 	}
