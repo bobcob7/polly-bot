@@ -5,18 +5,22 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"time"
 
-	"github.com/bobcob7/polly/pkg/discord/internal/echo"
-	"github.com/bobcob7/polly/pkg/discord/internal/ping"
-	"github.com/bobcob7/polly/pkg/discord/internal/whoami"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
 
+type Context struct {
+	context.Context
+	*discordgo.Session
+	*discordgo.InteractionCreate
+}
+
 type Command interface {
 	Name() string
 	Command() *discordgo.ApplicationCommand
-	Handle(s *discordgo.Session, i *discordgo.InteractionCreate)
+	Handle(ctx Context)
 }
 
 type AdvancedCommand interface {
@@ -24,17 +28,19 @@ type AdvancedCommand interface {
 	Run(ctx context.Context, s *discordgo.Session) error
 }
 
+type SecureCommand interface {
+	Command
+	ACLs() []string
+}
+
 type registeredCommand struct {
 	Command
-	id string
+	id   string
+	acls []string
 }
 
 func registerHandlers(commands ...Command) map[string]registeredCommand {
-	cmds := []Command{
-		&ping.Ping{},
-		&echo.Echo{},
-		&whoami.WhoAmI{},
-	}
+	cmds := []Command{}
 	cmds = append(cmds, commands...)
 	output := make(map[string]registeredCommand, len(cmds))
 	for _, cmd := range cmds {
@@ -44,7 +50,8 @@ func registerHandlers(commands ...Command) map[string]registeredCommand {
 }
 
 type Bot struct {
-	handles map[string]registeredCommand
+	handles      map[string]registeredCommand
+	roleResolver interface{ Get(string) (string, error) }
 }
 
 func New(cmds ...Command) *Bot {
@@ -80,6 +87,42 @@ func GetGuilds(token string) (map[string]string, error) {
 	return output, nil
 }
 
+func errorResponse(s *discordgo.Session, i *discordgo.Interaction, err error) {
+	zap.L().Error("Failed to get role names", zap.Error(err))
+	if err := s.InteractionRespond(i, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Title:   "Internal error?",
+			Content: "Internal error",
+		},
+	}); err != nil {
+		zap.L().Error("Failed to respond with error", zap.Error(err))
+	}
+}
+
+func aclMatch(allowed, available []string) bool {
+	for _, v := range available {
+		for _, a := range allowed {
+			if v == a {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (b *Bot) roleNames(s *discordgo.Session, roleIDs []string) ([]string, error) {
+	output := []string{}
+	for _, id := range roleIDs {
+		roleName, err := b.roleResolver.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, roleName)
+	}
+	return output, nil
+}
+
 func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 	if token == "" {
 		return fmt.Errorf("missing token")
@@ -89,11 +132,32 @@ func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create discord session %w", err)
 	}
+	// Setup role resolver
+	b.roleResolver = &roleCache{
+		session: session,
+		guildID: guildID,
+		ttl:     time.Minute,
+	}
 	// Add handler callbacks
 	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if h, ok := b.handles[i.ApplicationCommandData().Name]; ok {
 			zap.L().Debug("Handling command", zap.String("name", i.ApplicationCommandData().Name))
-			h.Handle(s, i)
+			ctx := Context{
+				Session:           s,
+				InteractionCreate: i,
+			}
+			// Check that ACLs match the user's roles
+			roleNames, err := b.roleNames(s, i.Member.Roles)
+			if err != nil {
+				errorResponse(s, i.Interaction, err)
+				return
+			}
+			if !aclMatch(h.acls, roleNames) {
+				// ACLs don't match, abort
+				errorResponse(s, i.Interaction, fmt.Errorf("permission denied"))
+				return
+			}
+			h.Handle(ctx)
 		} else {
 			log.Println("Failed to find command", i.ApplicationCommandData().Name)
 		}
@@ -126,6 +190,9 @@ func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 					err := advanced.Run(ctx, session)
 					errChan <- err
 				}()
+			}
+			if secured, ok := baseInt.(SecureCommand); ok {
+				v.acls = secured.ACLs()
 			}
 		}
 	}

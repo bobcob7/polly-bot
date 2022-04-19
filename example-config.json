@@ -3,5 +3,6 @@
     "HistoryLength": 1000,
     "DownloadDirectory": "/files",
     "ConnectionString": "postgres://root@localhost:26257/postgres?sslmode=disable",
-    "DiscordToken": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    "DiscordToken": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "RootDiscordUser": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
 }

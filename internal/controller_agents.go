@@ -26,13 +26,13 @@ func (c *commander) CreateAgentHelp() string {
 
 func (c *commander) CreateAgent(name, url string) string {
 	// At least validate that it's a valid schema
-	if !schemaRe.MatchString(url) {
-		logger.Error("invalid agent URL",
-			zap.String("name", name),
-			zap.String("url", url),
-		)
-		return "That URL doesn't look right."
-	}
+	// if !schemaRe.MatchString(url) {
+	// 	logger.Error("invalid agent URL",
+	// 		zap.String("name", name),
+	// 		zap.String("url", url),
+	// 	)
+	// 	return "That URL doesn't look right."
+	// }
 	err := AddAgent(c.db, name, url)
 	if err != nil {
 		logger.Error("failed to add agent to db",

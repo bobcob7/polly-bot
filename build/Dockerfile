@@ -25,8 +25,5 @@ FROM alpine:latest
 USER appuser:appuser
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-ENV TOKEN=""
-ENV GUILD=""
 COPY --from=builder /app/polly /usr/bin/polly
 CMD ["/usr/bin/polly"]

@@ -6,8 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/bobcob7/polly/internal/config"
+	"github.com/bobcob7/polly/internal/echo"
+	"github.com/bobcob7/polly/internal/mapper"
+	"github.com/bobcob7/polly/internal/ping"
+	"github.com/bobcob7/polly/internal/whoami"
 	"github.com/bobcob7/polly/pkg/discord"
 	"github.com/bobcob7/polly/pkg/transmission"
 	"go.uber.org/zap"
@@ -22,7 +28,6 @@ func init() {
 		panic(err)
 	}
 	zap.ReplaceGlobals(logger)
-	flag.StringVar(&tranmissionEndpoint, "endpoint", "https://transmission.bobcob7.com", "URL where transmission RPC can be reached")
 	flag.BoolVar(&showVersion, "version", false, "Print current version and exit")
 }
 
@@ -32,11 +37,19 @@ func main() {
 		fmt.Println("0.0.1")
 		os.Exit(0)
 	}
-	// Authentication Token pulled from environment variable DGU_TOKEN
-	token := os.Getenv("TOKEN")
-	guildID := os.Getenv("GUILD")
-	if guildID == "" {
-		guilds, err := discord.GetGuilds(token)
+	cfg := config.New()
+	dec := mapper.NewDecoder(os.LookupEnv, mapper.WithTagDefaulter(strings.ToUpper))
+	if err := dec.Decode(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	errs := cfg.Valid()
+	if !errs.Ok() {
+		fmt.Fprintln(os.Stderr, errs.Error())
+		os.Exit(1)
+	}
+	if cfg.Discord.GuildID == "" {
+		guilds, err := discord.GetGuilds(cfg.Discord.Token)
 		if err != nil {
 			zap.L().Fatal("failed to get guilds", zap.Error(err))
 		}
@@ -54,6 +67,9 @@ func main() {
 	}
 	// Start discord interface
 	bot := discord.New(
+		&whoami.WhoAmI{},
+		&echo.Echo{},
+		&ping.Ping{},
 		&transmission.AddDownload{Transmission: tr},
 		&transmission.UnfinishedDownloads{Transmission: tr},
 		&transmission.SubscribeDownloads{Transmission: tr},
@@ -61,7 +77,7 @@ func main() {
 	errChan := make(chan error, 1)
 	go func() {
 		defer close(errChan)
-		errChan <- bot.Run(ctx, token, guildID)
+		errChan <- bot.Run(ctx, cfg.Discord.Token, cfg.Discord.GuildID)
 	}()
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)

@@ -1,9 +1,7 @@
 package transmission
 
 import (
-	"context"
-	"time"
-
+	"github.com/bobcob7/polly/pkg/discord"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
@@ -31,15 +29,13 @@ func (p *AddDownload) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *AddDownload) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (p *AddDownload) Handle(ctx discord.Context) {
 	// Get argument
-	magnetLink := i.ApplicationCommandData().Options[0].StringValue()
-	ctx, done := context.WithTimeout(context.Background(), time.Second*10)
-	defer done()
+	magnetLink := ctx.ApplicationCommandData().Options[0].StringValue()
 	zap.L().Info("Downloading torrent", zap.String("magnet-link", magnetLink))
 
 	if err := p.AddLink(ctx, magnetLink); err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		ctx.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Title:   "Error",
@@ -48,7 +44,7 @@ func (p *AddDownload) Handle(s *discordgo.Session, i *discordgo.InteractionCreat
 		})
 		return
 	}
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	if err := ctx.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "Successfully added download",

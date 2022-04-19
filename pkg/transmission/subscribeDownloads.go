@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bobcob7/polly/pkg/discord"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
@@ -28,18 +29,18 @@ func (p *SubscribeDownloads) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *SubscribeDownloads) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (p *SubscribeDownloads) Handle(ctx discord.Context) {
 	var deleted bool
 	p.Lock()
-	if _, deleted = p.subscribedChannels[i.ChannelID]; deleted {
-		delete(p.subscribedChannels, i.ChannelID)
+	if _, deleted = p.subscribedChannels[ctx.ChannelID]; deleted {
+		delete(p.subscribedChannels, ctx.ChannelID)
 	} else {
-		p.subscribedChannels[i.ChannelID] = struct{}{}
+		p.subscribedChannels[ctx.ChannelID] = struct{}{}
 	}
 	p.Unlock()
 	var err error
 	if deleted {
-		err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		err = ctx.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Title:   "Successfully unsubscribed channel",
@@ -47,7 +48,7 @@ func (p *SubscribeDownloads) Handle(s *discordgo.Session, i *discordgo.Interacti
 			},
 		})
 	} else {
-		err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		err = ctx.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Title:   "Successfully subscribed channel",

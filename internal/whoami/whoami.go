@@ -3,6 +3,7 @@ package whoami
 import (
 	"fmt"
 
+	"github.com/bobcob7/polly/pkg/discord"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
@@ -20,14 +21,14 @@ func (p *WhoAmI) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *WhoAmI) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (p *WhoAmI) Handle(ctx discord.Context) {
 	var user *discordgo.User
 	var roles []string
-	if i.User != nil {
-		user = i.User
-	} else if i.Member != nil && i.Member.User != nil {
-		user = i.Member.User
-		roles = i.Member.Roles
+	if ctx.Interaction.User != nil {
+		user = ctx.Interaction.User
+	} else if ctx.Interaction.Member != nil && ctx.Interaction.Member.User != nil {
+		user = ctx.Interaction.Member.User
+		roles = ctx.Interaction.Member.Roles
 	}
 	content := fmt.Sprintf(`ID:		%s
 Name:	%s
@@ -38,7 +39,7 @@ Roles:	%v`,
 		user.Email,
 		roles,
 	)
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "Who Am I?",

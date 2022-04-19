@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bobcob7/polly/pkg/discord"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
@@ -64,10 +65,10 @@ func (p *Echo) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *Echo) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	delay, err := time.ParseDuration(i.ApplicationCommandData().Options[0].StringValue())
+func (p *Echo) Handle(ctx discord.Context) {
+	delay, err := time.ParseDuration(ctx.Interaction.ApplicationCommandData().Options[0].StringValue())
 	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Title:   "Error",
@@ -81,10 +82,10 @@ func (p *Echo) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	p.Lock()
 	p.jobs[fmt.Sprintf("%d", id)] = Job{
 		ttl:       ttl,
-		channelID: i.Interaction.ChannelID,
+		channelID: ctx.Interaction.ChannelID,
 	}
 	p.Unlock()
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "...",
