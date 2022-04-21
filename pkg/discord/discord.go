@@ -35,6 +35,10 @@ type Context struct {
 	userLevel int
 }
 
+func (c *Context) MinLevel() int {
+	return c.userLevel
+}
+
 func (c *Context) HasLevel(level int) bool {
 	return level <= c.userLevel
 }
