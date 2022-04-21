@@ -27,6 +27,7 @@ func (b *Bot) Start(ctx context.Context) <-chan error {
 	}
 	// Start discord interface
 	bot := discord.New(
+		"",
 		&transmission.AddDownload{Transmission: tr},
 		&transmission.UnfinishedDownloads{Transmission: tr},
 		&transmission.SubscribeDownloads{Transmission: tr},

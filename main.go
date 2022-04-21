@@ -66,6 +66,7 @@ func main() {
 	}
 	// Start discord interface
 	bot := discord.New(
+		cfg.Discord.RootUserID,
 		&whoami.WhoAmI{},
 		&echo.Echo{},
 		&ping.Ping{},

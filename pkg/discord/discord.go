@@ -50,13 +50,15 @@ func registerHandlers(commands ...Command) map[string]registeredCommand {
 }
 
 type Bot struct {
+	rootUserID   string
 	handles      map[string]registeredCommand
 	roleResolver interface{ Get(string) (string, error) }
 }
 
-func New(cmds ...Command) *Bot {
+func New(rootUserID string, cmds ...Command) *Bot {
 	return &Bot{
-		handles: registerHandlers(cmds...),
+		rootUserID: rootUserID,
+		handles:    registerHandlers(cmds...),
 	}
 }
 
@@ -146,16 +148,26 @@ func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 				Session:           s,
 				InteractionCreate: i,
 			}
-			// Check that ACLs match the user's roles
-			roleNames, err := b.roleNames(s, i.Member.Roles)
-			if err != nil {
-				errorResponse(s, i.Interaction, err)
+			if i.Member == nil {
+				// Message member doesn't exist
+				errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
 				return
 			}
-			if !aclMatch(h.acls, roleNames) {
-				// ACLs don't match, abort
-				errorResponse(s, i.Interaction, fmt.Errorf("permission denied"))
-				return
+			if i.Member.User.ID != b.rootUserID {
+				// Check that ACLs match the user's roles
+				roleNames, err := b.roleNames(s, i.Member.Roles)
+				if err != nil {
+					errorResponse(s, i.Interaction, err)
+					return
+				}
+				if !aclMatch(h.acls, roleNames) {
+					// ACLs don't match, abort
+					errorResponse(s, i.Interaction, fmt.Errorf("permission denied"))
+					return
+				}
+				zap.L().Info("Authorized user executing command", zap.String("name", i.ApplicationCommandData().Name), zap.String("userID", i.Member.User.ID))
+			} else {
+				zap.L().Info("Root user executing command", zap.String("name", i.ApplicationCommandData().Name))
 			}
 			h.Handle(ctx)
 		} else {
