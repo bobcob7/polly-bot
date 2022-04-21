@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: polly
+spec:
+  minReadySeconds: 3
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 60
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: polly
+  template:
+    metadata:
+      labels:
+        app: polly
+    spec:
+      containers:
+      - name: polly
+        image: bobcob7/polly-bot:master
+        imagePullPolicy: Always
+        envFrom:
+        - secretRef:
+            name: discord
+        - configMapRef:
+            name: polly-bot
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
