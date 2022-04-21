@@ -2,6 +2,7 @@ package transmission
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -30,6 +31,11 @@ func (p *SubscribeDownloads) Command() *discordgo.ApplicationCommand {
 }
 
 func (p *SubscribeDownloads) Handle(ctx discord.Context) {
+	// Check if user has permissions
+	if !ctx.HasLevel(1) {
+		ctx.Error(errors.New("Failed to subscribe to downloads: User does not have permissions"))
+		return
+	}
 	var deleted bool
 	p.Lock()
 	if _, deleted = p.subscribedChannels[ctx.ChannelID]; deleted {

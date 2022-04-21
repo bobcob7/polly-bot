@@ -6,25 +6,23 @@ import (
 	"log"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 )
 
 type Config struct {
 	Token      string
-	GuildID    string `map:"GUILD_ID"`
-	RootUserID string `map:"ROOT_USER_ID"`
-	RolePrefix string `map:"ROLE_PREFIX"`
+	GuildID    string   `map:"GUILD_ID"`
+	RootUserID string   `map:"ROOT_USER_ID"`
+	RolePrefix string   `map:"ROLE_PREFIX"`
+	RoleLevels []string `map:"ROLE_LEVEL"`
 }
 
 func (c Config) Valid() (errs []string) {
 	if c.Token == "" {
 		errs = append(errs, "Discord Token is required")
-	}
-	if c.RootUserID == "" {
-		errs = append(errs, "Discord RootUserID is required")
 	}
 	return
 }
@@ -33,6 +31,29 @@ type Context struct {
 	context.Context
 	*discordgo.Session
 	*discordgo.InteractionCreate
+	logger    *zap.Logger
+	userLevel int
+}
+
+func (c *Context) HasLevel(level int) bool {
+	return level <= c.userLevel
+}
+
+func (c *Context) Logger() *zap.Logger {
+	return c.logger
+}
+
+func (c *Context) Error(err error) {
+	c.logger.Info("Failed with error", zap.Error(err))
+	if err := c.Session.InteractionRespond(c.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Title:   "Error",
+			Content: err.Error(),
+		},
+	}); err != nil {
+		c.logger.Error("Failed to respond with error", zap.Error(err))
+	}
 }
 
 type Command interface {
@@ -44,11 +65,6 @@ type Command interface {
 type AdvancedCommand interface {
 	Command
 	Run(ctx context.Context, s *discordgo.Session) error
-}
-
-type SecureCommand interface {
-	Command
-	ACLs() []string
 }
 
 type registeredCommand struct {
@@ -69,7 +85,7 @@ func registerHandlers(commands ...Command) map[string]registeredCommand {
 
 type Bot struct {
 	config       Config
-	guildRoleMap map[string]guildRoleIDs
+	guildRoleMap map[string][]string
 	handles      map[string]registeredCommand
 	roleResolver interface{ Get(string) (string, error) }
 }
@@ -77,7 +93,7 @@ type Bot struct {
 func New(config Config, cmds ...Command) *Bot {
 	return &Bot{
 		config:       config,
-		guildRoleMap: map[string]guildRoleIDs{},
+		guildRoleMap: map[string][]string{},
 		handles:      registerHandlers(cmds...),
 	}
 }
@@ -145,26 +161,6 @@ func (b *Bot) roleNames(s *discordgo.Session, roleIDs []string) ([]string, error
 	return output, nil
 }
 
-type guildRoleIDs struct {
-	Admin     string
-	Moderator string
-	User      string
-}
-
-func (g guildRoleIDs) missing() []string {
-	output := []string{}
-	if g.Admin == "" {
-		output = append(output, "Admin")
-	}
-	if g.Moderator == "" {
-		output = append(output, "Moderator")
-	}
-	if g.User == "" {
-		output = append(output, "User")
-	}
-	return output
-}
-
 func (b *Bot) updateGuildRoles(s *discordgo.Session, guildID string) {
 	logger := zap.L().With(zap.String("guildID", guildID))
 	roles, err := s.GuildRoles(guildID)
@@ -172,28 +168,20 @@ func (b *Bot) updateGuildRoles(s *discordgo.Session, guildID string) {
 		logger.Error("failed to get roles", zap.Error(err))
 		return
 	}
-	var found guildRoleIDs
+	found := make(map[string]struct{}, len(b.config.RoleLevels))
 	for _, role := range roles {
 		if strings.HasPrefix(role.Name, b.config.RolePrefix) {
-			switch strings.ToUpper(strings.TrimLeft(role.Name, b.config.RolePrefix)) {
-			case "ADMIN":
-				logger.Info("Found admin role", zap.String("roleID", role.ID))
-				found.Admin = role.ID
-			case "MODERATOR":
-				logger.Info("Found moderator role", zap.String("roleID", role.ID))
-				found.Moderator = role.ID
-			case "USER":
-				logger.Info("Found user role", zap.String("roleID", role.ID))
-				found.User = role.ID
+			for _, suffix := range b.config.RoleLevels {
+				if strings.HasSuffix(role.Name, suffix) {
+					found[role.ID] = struct{}{}
+				}
 			}
 		}
 	}
-	if missing := found.missing(); len(missing) != 0 {
-		logger.Error("Failed to find all roles", zap.Strings("missingRoles", missing))
-	} else {
-		logger.Info("Found all roles")
+	b.guildRoleMap[guildID] = maps.Keys(found)
+	if len(b.guildRoleMap[guildID]) != len(b.config.RoleLevels) {
+		logger.Warn("Failed to find all roles", zap.Int("gotNum", len(b.guildRoleMap[guildID])), zap.Int("wantNum", len(b.config.RoleLevels)))
 	}
-	b.guildRoleMap[guildID] = found
 }
 
 func (b *Bot) Run(ctx context.Context) error {
@@ -205,40 +193,39 @@ func (b *Bot) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create discord session %w", err)
 	}
-	// Setup role resolver
-	b.roleResolver = &roleCache{
-		session: session,
-		guildID: b.config.GuildID,
-		ttl:     time.Minute,
-	}
 	// Add handler callbacks
 	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if h, ok := b.handles[i.ApplicationCommandData().Name]; ok {
-			zap.L().Debug("Handling command", zap.String("name", i.ApplicationCommandData().Name))
+			logger := zap.L().With(zap.String("guildID", i.GuildID), zap.String("commandName", i.ApplicationCommandData().Name))
+			logger.Debug("Handling command")
 			ctx := Context{
 				Session:           s,
 				InteractionCreate: i,
+				userLevel:         9999,
 			}
-			if i.Member == nil {
+			if i.Member == nil || i.Member.User == nil {
 				// Message member doesn't exist
 				errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
 				return
 			}
-			if i.Member.User.ID != b.config.RootUserID {
-				// Check that ACLs match the user's roles
-				roleNames, err := b.roleNames(s, i.Member.Roles)
-				if err != nil {
-					errorResponse(s, i.Interaction, err)
-					return
-				}
-				if !aclMatch(h.acls, roleNames) {
-					// ACLs don't match, abort
-					errorResponse(s, i.Interaction, fmt.Errorf("permission denied"))
-					return
-				}
-				zap.L().Info("Authorized user executing command", zap.String("name", i.ApplicationCommandData().Name), zap.String("userID", i.Member.User.ID))
+			ctx.logger = logger.With(zap.String("userID", i.Member.User.ID))
+			if i.Member.User.ID == b.config.RootUserID {
+				ctx.logger = ctx.logger.With(zap.Int("userLevel", 0))
+				ctx.userLevel = 0
 			} else {
-				zap.L().Info("Root user executing command", zap.String("name", i.ApplicationCommandData().Name))
+				roles, ok := b.guildRoleMap[i.GuildID]
+				if !ok {
+					// Guild isn't setup correctly
+					errorResponse(s, i.Interaction, fmt.Errorf("guild roles not setup"))
+					return
+				}
+				// Get min user level
+				for level, roleID := range roles {
+					if contains(roleID, i.Member.Roles) {
+						ctx.userLevel = level + 1
+						break
+					}
+				}
 			}
 			h.Handle(ctx)
 		} else {
@@ -286,9 +273,6 @@ func (b *Bot) Run(ctx context.Context) error {
 					errChan <- err
 				}()
 			}
-			if secured, ok := baseInt.(SecureCommand); ok {
-				v.acls = secured.ACLs()
-			}
 		}
 	}
 	// Wait for context to be cancelled
@@ -305,4 +289,13 @@ func (b *Bot) Run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func contains[T comparable](x T, xs []T) bool {
+	for _, y := range xs {
+		if x == y {
+			return true
+		}
+	}
+	return false
 }
