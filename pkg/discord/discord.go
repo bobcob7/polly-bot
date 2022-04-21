@@ -5,11 +5,29 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
+
+type Config struct {
+	Token      string
+	GuildID    string `map:"GUILD_ID"`
+	RootUserID string `map:"ROOT_USER_ID"`
+	RolePrefix string `map:"ROLE_PREFIX"`
+}
+
+func (c Config) Valid() (errs []string) {
+	if c.Token == "" {
+		errs = append(errs, "Discord Token is required")
+	}
+	if c.RootUserID == "" {
+		errs = append(errs, "Discord RootUserID is required")
+	}
+	return
+}
 
 type Context struct {
 	context.Context
@@ -50,15 +68,17 @@ func registerHandlers(commands ...Command) map[string]registeredCommand {
 }
 
 type Bot struct {
-	rootUserID   string
+	config       Config
+	guildRoleMap map[string]guildRoleIDs
 	handles      map[string]registeredCommand
 	roleResolver interface{ Get(string) (string, error) }
 }
 
-func New(rootUserID string, cmds ...Command) *Bot {
+func New(config Config, cmds ...Command) *Bot {
 	return &Bot{
-		rootUserID: rootUserID,
-		handles:    registerHandlers(cmds...),
+		config:       config,
+		guildRoleMap: map[string]guildRoleIDs{},
+		handles:      registerHandlers(cmds...),
 	}
 }
 
@@ -125,19 +145,70 @@ func (b *Bot) roleNames(s *discordgo.Session, roleIDs []string) ([]string, error
 	return output, nil
 }
 
-func (b *Bot) Run(ctx context.Context, token, guildID string) error {
-	if token == "" {
+type guildRoleIDs struct {
+	Admin     string
+	Moderator string
+	User      string
+}
+
+func (g guildRoleIDs) missing() []string {
+	output := []string{}
+	if g.Admin == "" {
+		output = append(output, "Admin")
+	}
+	if g.Moderator == "" {
+		output = append(output, "Moderator")
+	}
+	if g.User == "" {
+		output = append(output, "User")
+	}
+	return output
+}
+
+func (b *Bot) updateGuildRoles(s *discordgo.Session, guildID string) {
+	logger := zap.L().With(zap.String("guildID", guildID))
+	roles, err := s.GuildRoles(guildID)
+	if err != nil {
+		logger.Error("failed to get roles", zap.Error(err))
+		return
+	}
+	var found guildRoleIDs
+	for _, role := range roles {
+		if strings.HasPrefix(role.Name, b.config.RolePrefix) {
+			switch strings.ToUpper(strings.TrimLeft(role.Name, b.config.RolePrefix)) {
+			case "ADMIN":
+				logger.Info("Found admin role", zap.String("roleID", role.ID))
+				found.Admin = role.ID
+			case "MODERATOR":
+				logger.Info("Found moderator role", zap.String("roleID", role.ID))
+				found.Moderator = role.ID
+			case "USER":
+				logger.Info("Found user role", zap.String("roleID", role.ID))
+				found.User = role.ID
+			}
+		}
+	}
+	if missing := found.missing(); len(missing) != 0 {
+		logger.Error("Failed to find all roles", zap.Strings("missingRoles", missing))
+	} else {
+		logger.Info("Found all roles")
+	}
+	b.guildRoleMap[guildID] = found
+}
+
+func (b *Bot) Run(ctx context.Context) error {
+	if b.config.Token == "" {
 		return fmt.Errorf("missing token")
 	}
 	// Create Discord session
-	session, err := discordgo.New("Bot " + token)
+	session, err := discordgo.New("Bot " + b.config.Token)
 	if err != nil {
 		return fmt.Errorf("failed to create discord session %w", err)
 	}
 	// Setup role resolver
 	b.roleResolver = &roleCache{
 		session: session,
-		guildID: guildID,
+		guildID: b.config.GuildID,
 		ttl:     time.Minute,
 	}
 	// Add handler callbacks
@@ -153,7 +224,7 @@ func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 				errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
 				return
 			}
-			if i.Member.User.ID != b.rootUserID {
+			if i.Member.User.ID != b.config.RootUserID {
 				// Check that ACLs match the user's roles
 				roleNames, err := b.roleNames(s, i.Member.Roles)
 				if err != nil {
@@ -174,9 +245,21 @@ func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 			log.Println("Failed to find command", i.ApplicationCommandData().Name)
 		}
 	})
+	session.AddHandler(func(s *discordgo.Session, g *discordgo.GuildRoleCreate) {
+		b.updateGuildRoles(s, g.GuildID)
+	})
+	session.AddHandler(func(s *discordgo.Session, g *discordgo.GuildRoleDelete) {
+		b.updateGuildRoles(s, g.GuildID)
+	})
+	session.AddHandler(func(s *discordgo.Session, g *discordgo.GuildRoleUpdate) {
+		b.updateGuildRoles(s, g.GuildID)
+	})
 	// Add ready callback
 	session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		log.Printf("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
+		for _, guild := range r.Guilds {
+			b.updateGuildRoles(s, guild.ID)
+		}
 	})
 	// Open session
 	if err := session.Open(); err != nil {
@@ -188,7 +271,7 @@ func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 	for name, v := range b.handles {
 		command := v.Command.Command()
 		command.Name = name
-		if cmd, err := session.ApplicationCommandCreate(session.State.User.ID, guildID, command); err != nil {
+		if cmd, err := session.ApplicationCommandCreate(session.State.User.ID, b.config.GuildID, command); err != nil {
 			return fmt.Errorf("failed to create %s command %w", name, err)
 		} else {
 			v.id = cmd.ID
@@ -216,7 +299,7 @@ func (b *Bot) Run(ctx context.Context, token, guildID string) error {
 	}
 	// Cleanup Session
 	for _, v := range b.handles {
-		err := session.ApplicationCommandDelete(session.State.User.ID, guildID, v.id)
+		err := session.ApplicationCommandDelete(session.State.User.ID, b.config.GuildID, v.id)
 		if err != nil {
 			return fmt.Errorf("failed to delete %s command %w", v.Name(), err)
 		}

@@ -22,7 +22,7 @@ import (
 var showVersion bool
 
 func init() {
-	logger, err := zap.NewDevelopment()
+	logger, err := zap.NewProduction()
 	if err != nil {
 		panic(err)
 	}
@@ -66,7 +66,7 @@ func main() {
 	}
 	// Start discord interface
 	bot := discord.New(
-		cfg.Discord.RootUserID,
+		cfg.Discord,
 		&whoami.WhoAmI{},
 		&echo.Echo{},
 		&ping.Ping{},
@@ -77,7 +77,7 @@ func main() {
 	errChan := make(chan error, 1)
 	go func() {
 		defer close(errChan)
-		errChan <- bot.Run(ctx, cfg.Discord.Token, cfg.Discord.GuildID)
+		errChan <- bot.Run(ctx)
 	}()
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)

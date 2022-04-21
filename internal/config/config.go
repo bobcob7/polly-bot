@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"regexp"
 	"time"
+
+	"github.com/bobcob7/polly/pkg/discord"
 )
 
 func New() *Config {
@@ -20,7 +22,7 @@ type Config struct {
 	RSSPeriod     string `map:"RSS_PERIOD"`
 	HistoryLength int    `map:"HISTORY_LENGTH"`
 	Database      ConfigDatabase
-	Discord       ConfigDiscord
+	Discord       discord.Config
 	Transmission  ConfigTransmission
 }
 
@@ -96,22 +98,6 @@ func (c Config) Valid() (errs Errors) {
 		errs.Add("HistoryLength must be less than 100000")
 	}
 	errs.Append(c.Transmission.Valid())
-	errs.Append(c.Discord.Valid())
-	return
-}
-
-type ConfigDiscord struct {
-	Token      string
-	GuildID    string `map:"GUILD_ID"`
-	RootUserID string `map:"ROOT_USER_ID"`
-}
-
-func (c ConfigDiscord) Valid() (errs Errors) {
-	if c.Token == "" {
-		errs.Add("Discord Token is required")
-	}
-	if c.RootUserID == "" {
-		errs.Add("Discord RootUserID is required")
-	}
+	errs.Add(c.Discord.Valid()...)
 	return
 }
