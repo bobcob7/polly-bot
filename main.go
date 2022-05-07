@@ -33,7 +33,7 @@ func init() {
 func main() {
 	flag.Parse()
 	if showVersion {
-		fmt.Println("0.0.1")
+		fmt.Println("0.0.2")
 		os.Exit(0)
 	}
 	cfg := config.New()

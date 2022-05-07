@@ -5,19 +5,14 @@ import (
 	"fmt"
 	"log"
 	"reflect"
-	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
 )
 
 type Config struct {
-	Token      string
-	GuildID    string   `map:"GUILD_ID"`
-	RootUserID string   `map:"ROOT_USER_ID"`
-	RolePrefix string   `map:"ROLE_PREFIX"`
-	RoleLevels []string `map:"ROLE_LEVEL"`
+	Token   string
+	GuildID string `map:"GUILD_ID"`
 }
 
 func (c Config) Valid() (errs []string) {
@@ -165,29 +160,6 @@ func (b *Bot) roleNames(s *discordgo.Session, roleIDs []string) ([]string, error
 	return output, nil
 }
 
-func (b *Bot) updateGuildRoles(s *discordgo.Session, guildID string) {
-	logger := zap.L().With(zap.String("guildID", guildID))
-	roles, err := s.GuildRoles(guildID)
-	if err != nil {
-		logger.Error("failed to get roles", zap.Error(err))
-		return
-	}
-	found := make(map[string]struct{}, len(b.config.RoleLevels))
-	for _, role := range roles {
-		if strings.HasPrefix(role.Name, b.config.RolePrefix) {
-			for _, suffix := range b.config.RoleLevels {
-				if strings.HasSuffix(role.Name, suffix) {
-					found[role.ID] = struct{}{}
-				}
-			}
-		}
-	}
-	b.guildRoleMap[guildID] = maps.Keys(found)
-	if len(b.guildRoleMap[guildID]) != len(b.config.RoleLevels) {
-		logger.Warn("Failed to find all roles", zap.Int("gotNum", len(b.guildRoleMap[guildID])), zap.Int("wantNum", len(b.config.RoleLevels)))
-	}
-}
-
 func (b *Bot) Run(ctx context.Context) error {
 	if b.config.Token == "" {
 		return fmt.Errorf("missing token")
@@ -213,44 +185,14 @@ func (b *Bot) Run(ctx context.Context) error {
 				return
 			}
 			ctx.logger = logger.With(zap.String("userID", i.Member.User.ID))
-			if i.Member.User.ID == b.config.RootUserID {
-				ctx.logger = ctx.logger.With(zap.Int("userLevel", 0))
-				ctx.userLevel = 0
-			} else {
-				roles, ok := b.guildRoleMap[i.GuildID]
-				if !ok {
-					// Guild isn't setup correctly
-					errorResponse(s, i.Interaction, fmt.Errorf("guild roles not setup"))
-					return
-				}
-				// Get min user level
-				for level, roleID := range roles {
-					if contains(roleID, i.Member.Roles) {
-						ctx.userLevel = level + 1
-						break
-					}
-				}
-			}
 			h.Handle(ctx)
 		} else {
 			log.Println("Failed to find command", i.ApplicationCommandData().Name)
 		}
 	})
-	session.AddHandler(func(s *discordgo.Session, g *discordgo.GuildRoleCreate) {
-		b.updateGuildRoles(s, g.GuildID)
-	})
-	session.AddHandler(func(s *discordgo.Session, g *discordgo.GuildRoleDelete) {
-		b.updateGuildRoles(s, g.GuildID)
-	})
-	session.AddHandler(func(s *discordgo.Session, g *discordgo.GuildRoleUpdate) {
-		b.updateGuildRoles(s, g.GuildID)
-	})
 	// Add ready callback
 	session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		log.Printf("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
-		for _, guild := range r.Guilds {
-			b.updateGuildRoles(s, guild.ID)
-		}
 	})
 	// Open session
 	if err := session.Open(); err != nil {
