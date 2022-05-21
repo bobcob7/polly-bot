@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var cli http.Client
-
 var defaultDownloadDir string = "/downloads/complete"
 
 type Transmission struct {
@@ -245,7 +243,7 @@ func (t *Transmission) callRPC(ctx context.Context, requestMethod string, reques
 	for {
 		logger.Debug("Calling RPC")
 		req.Header.Add("X-Transmission-Session-Id", t.sessionID)
-		resp, err = cli.Do(req)
+		resp, err = t.cli.Do(req)
 		if err != nil {
 			logger.Error("Failed to call RPC", zap.Error(err))
 			return err

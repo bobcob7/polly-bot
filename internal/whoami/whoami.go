@@ -33,12 +33,10 @@ func (p *WhoAmI) Handle(ctx discord.Context) {
 	content := fmt.Sprintf(`ID:		%s
 Name:	%s
 Email:	%s
-Level:  %d
 Roles:	%v`,
 		user.ID,
 		user.Username,
 		user.Email,
-		ctx.MinLevel(),
 		roles,
 	)
 	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{

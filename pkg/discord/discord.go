@@ -30,14 +30,6 @@ type Context struct {
 	userLevel int
 }
 
-func (c *Context) MinLevel() int {
-	return c.userLevel
-}
-
-func (c *Context) HasLevel(level int) bool {
-	return level <= c.userLevel
-}
-
 func (c *Context) Logger() *zap.Logger {
 	return c.logger
 }
@@ -173,11 +165,10 @@ func (b *Bot) Run(ctx context.Context) error {
 	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if h, ok := b.handles[i.ApplicationCommandData().Name]; ok {
 			logger := zap.L().With(zap.String("guildID", i.GuildID), zap.String("commandName", i.ApplicationCommandData().Name))
-			logger.Debug("Handling command")
+			logger.Info("Handling command")
 			ctx := Context{
 				Session:           s,
 				InteractionCreate: i,
-				userLevel:         9999,
 			}
 			if i.Member == nil || i.Member.User == nil {
 				// Message member doesn't exist
