@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
@@ -166,7 +167,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		if h, ok := b.handles[i.ApplicationCommandData().Name]; ok {
 			logger := zap.L().With(zap.String("guildID", i.GuildID), zap.String("commandName", i.ApplicationCommandData().Name))
 			logger.Info("Handling command")
-			ctx := Context{
+			handleContext := Context{
 				Session:           s,
 				InteractionCreate: i,
 			}
@@ -175,8 +176,11 @@ func (b *Bot) Run(ctx context.Context) error {
 				errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
 				return
 			}
-			ctx.logger = logger.With(zap.String("userID", i.Member.User.ID))
-			h.Handle(ctx)
+			handleContext.logger = logger.With(zap.String("userID", i.Member.User.ID))
+			var done context.CancelFunc
+			handleContext.Context, done = context.WithTimeout(ctx, time.Second*10)
+			defer done()
+			h.Handle(handleContext)
 		} else {
 			log.Println("Failed to find command", i.ApplicationCommandData().Name)
 		}
