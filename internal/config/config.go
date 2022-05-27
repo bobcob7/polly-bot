@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/bobcob7/polly/pkg/discord"
@@ -19,22 +20,65 @@ func New() *Config {
 }
 
 type Config struct {
-	RSSPeriod     string `map:"RSS_PERIOD"`
-	HistoryLength int    `map:"HISTORY_LENGTH"`
-	Database      ConfigDatabase
+	RSSPeriod     string         `map:"RSS_PERIOD"`
+	HistoryLength int            `map:"HISTORY_LENGTH"`
+	Database      ConfigDatabase `map:"DATABASE"`
 	Discord       discord.Config
 	Transmission  ConfigTransmission
 }
 
 type ConfigDatabase struct {
-	ConnectionString string
+	Address          string
+	Port             int
+	Username         string
+	Password         string
+	Database         string
+	SSLMode          string `map:"SSL_MODE"`
+	ConnectionString string `map:"CONNECTION_STRING"`
 }
 
 func (c ConfigDatabase) Valid() (errs Errors) {
-	if !schemaRe.MatchString(c.ConnectionString) {
-		errs.Add("ConnectionString must have a valid schema")
+	if c.ConnectionString != "" {
+		if !schemaRe.MatchString(c.ConnectionString) {
+			errs.Add("ConnectionString must have a valid schema")
+		}
+	} else {
+		if c.Address == "" {
+			errs.Add("Address is required")
+		}
+		if c.Port <= 0 {
+			errs.Add("Port must be above 0")
+		}
+		if c.Port > 35565 {
+			errs.Add("Port must be below 35565")
+		}
+		if c.Username == "" {
+			errs.Add("Username is required")
+		}
+		if c.Database == "" {
+			errs.Add("Database is required")
+		}
 	}
 	return
+}
+
+func (c ConfigDatabase) String() string {
+	if c.ConnectionString != "" {
+		return c.ConnectionString
+	}
+	credentials := c.Username
+	if c.Password != "" {
+		credentials += ":" + c.Password
+	}
+	output := fmt.Sprintf("postgres://%s@%s:%d/%s", credentials, c.Address, c.Port, c.Database)
+	options := []string{}
+	if c.SSLMode != "" {
+		options = append(options, "sslmode="+c.SSLMode)
+	}
+	if len(options) > 0 {
+		output = output + "?" + strings.Join(options, "&")
+	}
+	return output
 }
 
 type ConfigTransmission struct {

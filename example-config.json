@@ -2,7 +2,13 @@
     "RSSPeriod": "30s",
     "HistoryLength": 1000,
     "DownloadDirectory": "/files",
-    "ConnectionString": "postgres://root@localhost:26257/postgres?sslmode=disable",
     "DiscordToken": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
     "RootDiscordUser": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "Database": {
+        "Address": "localhost",
+        "Username": "root",
+        "Port": "26257",
+        "Database": "postgres",
+        "SSLMode": "disable"
+    }
 }

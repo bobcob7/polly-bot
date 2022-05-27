@@ -1,0 +1,42 @@
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: shadow-polly-db
+spec:
+  teamId: shadow
+  volume:
+    size: 1Gi
+    storageClass: sticky-nfs-storage
+  # additionalVolumes:
+  # - name: data
+  #   mountPath: /home/postgres/pgdata/partitions
+  #   targetContainers:
+  #   - postgres
+  #   volumeSource:
+  #     PersistentVolumeClaim:
+  #       claimName: polly-db-data-partitions
+  #       readyOnly: false
+  #       spec:
+  #         accessModes:
+  #         - ReadWriteMany
+  #         resources:
+  #           requests:
+  #             storage: 250Mi
+  #         storageClassName: sticky-nfs-storage
+  numberOfInstances: 2
+  users:
+    bobcob7:  # database owner
+    - superuser
+    - createdb
+    polly: []  # role for application foo
+  databases:
+    polly: bobcob7  # dbname: owner
+  resources:
+    requests:
+      cpu: 10m
+      memory: 100Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  postgresql:
+    version: "14"
