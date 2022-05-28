@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v4"
 	"go.uber.org/zap"
 )
 
@@ -21,9 +22,10 @@ type Transmission struct {
 	downloadDir         string
 	cli                 *http.Client
 	downloadingTorrents []int
+	db                  *pgx.Conn
 }
 
-func New(ctx context.Context, rootURL string) (*Transmission, error) {
+func New(ctx context.Context, rootURL string, db *pgx.Conn) (*Transmission, error) {
 	tr := &Transmission{
 		rootURL:     rootURL,
 		downloadDir: defaultDownloadDir,
@@ -31,6 +33,7 @@ func New(ctx context.Context, rootURL string) (*Transmission, error) {
 			Timeout: time.Second * 10,
 		},
 		downloadingTorrents: make([]int, 0),
+		db:                  db,
 	}
 	if err := tr.getSession(ctx); err != nil {
 		return nil, fmt.Errorf("failed getting session: %w", err)
@@ -306,6 +309,12 @@ func (t TorrentWithName) String() string {
 	return fmt.Sprintf(`%s: %v(%f%%)`, t.Name, t.TotalSize, t.PercentDone*100)
 }
 
+func (t TorrentWithName) AddToDB(db *pgx.Conn) error {
+	query := `INSERT INTO torrent (id, name, percent_done, total_size, status, left_until_done, rate_downloaded, is_stalled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err := db.Exec(query, t.ID, t.Name, t.PercentDone, t.TotalSize, t.Status, t.LeftUntilDone, t.RateDownload, t.IsStalled)
+	return err
+}
+
 type listTorrentsRequestArgs struct {
 	IDs    []int    `json:"ids,omitempty"`
 	Fields []string `json:"fields"`
@@ -324,6 +333,10 @@ func (t *Transmission) getDownloadingTorrents(ctx context.Context) (map[int]Torr
 	}
 	ids := make(map[int]TorrentWithName, len(response.Arguments.Torrents))
 	for _, torrent := range response.Arguments.Torrents {
+		// Add to db
+		if err := torrent.AddToDB(t.db); err != nil {
+			return nil, fmt.Errorf("failed to add torrent to database: %w", err)
+		}
 		if torrent.Status == 0 {
 			continue
 		}

@@ -1,2 +1,1 @@
-DROP TABLE IF EXISTS agents;
-DROP TABLE IF EXISTS subjects;
+DROP TABLE IF EXISTS torrents;

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"flag"
 	"fmt"
 	"os"
@@ -16,10 +17,37 @@ import (
 	"github.com/bobcob7/polly/internal/whoami"
 	"github.com/bobcob7/polly/pkg/discord"
 	"github.com/bobcob7/polly/pkg/transmission"
+	"github.com/golang-migrate/migrate"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/jackc/pgx/v4"
 	"go.uber.org/zap"
 )
 
 var showVersion bool
+
+//go:embed migrations/*.sql
+var fs embed.FS
+
+func getDatabase(ctx context.Context, cfg config.ConfigDatabase) (*pgx.Conn, error) {
+	d, err := iofs.New(fs, "migrations")
+	if err != nil {
+		return nil, err
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", d, cfg.String())
+	if err != nil {
+		return nil, err
+	}
+	err = m.Up()
+	if err != nil {
+		return nil, err
+	}
+	conn, err := pgx.Connect(ctx, cfg.String())
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+	return conn, nil
+}
 
 func init() {
 	logger, err := zap.NewProduction()
@@ -59,8 +87,13 @@ func main() {
 	}
 	ctx, done := context.WithCancel(context.Background())
 	defer done()
+	// Start database connection
+	conn, err := getDatabase(ctx, cfg.Database)
+	if err != nil {
+		zap.L().Fatal("failed to connect to database", zap.Error(err))
+	}
 	// Start transmission interface
-	tr, err := transmission.New(ctx, cfg.Transmission.Endpoint)
+	tr, err := transmission.New(ctx, cfg.Transmission.Endpoint, conn)
 	if err != nil {
 		zap.L().Fatal("failed to connect to tranmission RPC server", zap.Error(err))
 	}
