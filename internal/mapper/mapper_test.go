@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bobcob7/polly/internal/mapper"
+	"github.com/bobcob7/polly-bot/internal/mapper"
 	"github.com/go-test/deep"
 )
 

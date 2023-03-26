@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -27,8 +28,7 @@ type Context struct {
 	context.Context
 	*discordgo.Session
 	*discordgo.InteractionCreate
-	logger    *zap.Logger
-	userLevel int
+	logger *zap.Logger
 }
 
 func (c *Context) Logger() *zap.Logger {
@@ -48,46 +48,84 @@ func (c *Context) Error(err error) {
 	}
 }
 
-type Command interface {
+type BaseCommand interface {
 	Name() string
 	Command() *discordgo.ApplicationCommand
-	Handle(ctx Context)
+	Handle(ctx Context) error
 }
 
-type AdvancedCommand interface {
-	Command
+type InitCommand interface {
+	BaseCommand
 	Run(ctx context.Context, s *discordgo.Session) error
 }
 
-type registeredCommand struct {
-	Command
-	id   string
-	acls []string
+type ModalCommand interface {
+	BaseCommand
+	HasCustomID(id string) bool
+	HandleModal(ctx Context, id string) error
 }
 
-func registerHandlers(commands ...Command) map[string]registeredCommand {
-	cmds := []Command{}
-	cmds = append(cmds, commands...)
-	output := make(map[string]registeredCommand, len(cmds))
-	for _, cmd := range cmds {
-		output[cmd.Name()] = registeredCommand{Command: cmd}
+type registeredCommand struct {
+	BaseCommand
+	id string
+}
+
+var NotFoundError = errors.New("custom ID not found")
+
+func (b *Bot) registerHandles(commands ...BaseCommand) {
+	b.baseHandles = make(map[string]registeredCommand, len(commands))
+	for _, rawCommand := range commands {
+		base := reflect.ValueOf(rawCommand)
+		if !base.IsValid() {
+			panic("invalid base handler")
+		}
+		baseInt := base.Interface()
+		if modalCmd, ok := baseInt.(BaseCommand); ok {
+			b.baseHandles[modalCmd.Name()] = registeredCommand{
+				BaseCommand: modalCmd,
+				id:          "",
+			}
+		}
 	}
-	return output
+	b.initHandles = make(map[string]InitCommand, len(commands))
+	for _, rawCommand := range commands {
+		base := reflect.ValueOf(rawCommand)
+		if !base.IsValid() {
+			panic("invalid init handler")
+		}
+		baseInt := base.Interface()
+		if modalCmd, ok := baseInt.(InitCommand); ok {
+			b.initHandles[modalCmd.Name()] = modalCmd
+		}
+	}
+	b.modalHandles = make(map[string]ModalCommand, len(commands))
+	for _, rawCommand := range commands {
+		base := reflect.ValueOf(rawCommand)
+		if !base.IsValid() {
+			panic("invalid modal handler")
+		}
+		baseInt := base.Interface()
+		if modalCmd, ok := baseInt.(ModalCommand); ok {
+			b.modalHandles[modalCmd.Name()] = modalCmd
+		}
+	}
 }
 
 type Bot struct {
 	config       Config
 	guildRoleMap map[string][]string
-	handles      map[string]registeredCommand
-	roleResolver interface{ Get(string) (string, error) }
+	baseHandles  map[string]registeredCommand
+	initHandles  map[string]InitCommand
+	modalHandles map[string]ModalCommand
 }
 
-func New(config Config, cmds ...Command) *Bot {
-	return &Bot{
+func New(config Config, cmds ...BaseCommand) *Bot {
+	b := &Bot{
 		config:       config,
 		guildRoleMap: map[string][]string{},
-		handles:      registerHandlers(cmds...),
 	}
+	b.registerHandles(cmds...)
+	return b
 }
 
 func GetGuilds(token string) (map[string]string, error) {
@@ -130,29 +168,6 @@ func errorResponse(s *discordgo.Session, i *discordgo.Interaction, err error) {
 	}
 }
 
-func aclMatch(allowed, available []string) bool {
-	for _, v := range available {
-		for _, a := range allowed {
-			if v == a {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (b *Bot) roleNames(s *discordgo.Session, roleIDs []string) ([]string, error) {
-	output := []string{}
-	for _, id := range roleIDs {
-		roleName, err := b.roleResolver.Get(id)
-		if err != nil {
-			return nil, err
-		}
-		output = append(output, roleName)
-	}
-	return output, nil
-}
-
 func (b *Bot) Run(ctx context.Context) error {
 	if b.config.Token == "" {
 		return fmt.Errorf("missing token")
@@ -164,25 +179,115 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 	// Add handler callbacks
 	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if h, ok := b.handles[i.ApplicationCommandData().Name]; ok {
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
 			logger := zap.L().With(zap.String("guildID", i.GuildID), zap.String("commandName", i.ApplicationCommandData().Name))
-			logger.Info("Handling command")
-			handleContext := Context{
-				Session:           s,
-				InteractionCreate: i,
+			if h, ok := b.baseHandles[i.ApplicationCommandData().Name]; ok {
+				logger.Info("Handling command")
+				handleContext := Context{
+					Session:           s,
+					InteractionCreate: i,
+				}
+				if i.Member == nil || i.Member.User == nil {
+					// Message member doesn't exist
+					errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
+					return
+				}
+				handleContext.logger = logger.With(zap.String("userID", i.Member.User.ID))
+				var done context.CancelFunc
+				handleContext.Context, done = context.WithTimeout(ctx, time.Second*10)
+				defer done()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.Error("Recovering from panic", zap.Error(err))
+							_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
+								Type: discordgo.InteractionResponseChannelMessageWithSource,
+								Data: &discordgo.InteractionResponseData{
+									Title:   "Panic",
+									Content: fmt.Sprintf("Panic while processing command: %s", r),
+								},
+							})
+						}
+					}()
+					if err := h.Handle(handleContext); err != nil {
+						logger.Info("Handler error", zap.Error(err))
+						var msg string
+						if pubErr, ok := err.(interface{ Public() string }); ok {
+							msg = pubErr.Public()
+						} else {
+							msg = err.Error()
+						}
+						_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseChannelMessageWithSource,
+							Data: &discordgo.InteractionResponseData{
+								Title:   "Error",
+								Content: msg,
+							},
+						})
+					}
+				}()
+			} else {
+				logger.Error("failed to find command")
 			}
-			if i.Member == nil || i.Member.User == nil {
-				// Message member doesn't exist
-				errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
-				return
+
+		case discordgo.InteractionModalSubmit:
+			customID := i.Interaction.ModalSubmitData().CustomID
+			logger := zap.L().With(zap.String("guildID", i.GuildID), zap.String("customID", customID))
+			var handle ModalCommand
+			for _, h := range b.modalHandles {
+				if h.HasCustomID(customID) {
+					handle = h
+					break
+				}
 			}
-			handleContext.logger = logger.With(zap.String("userID", i.Member.User.ID))
-			var done context.CancelFunc
-			handleContext.Context, done = context.WithTimeout(ctx, time.Second*10)
-			defer done()
-			h.Handle(handleContext)
-		} else {
-			log.Println("Failed to find command", i.ApplicationCommandData().Name)
+			if handle != nil {
+				logger.Info("Handling modal submission")
+				handleContext := Context{
+					Session:           s,
+					InteractionCreate: i,
+				}
+				if i.Member == nil || i.Member.User == nil {
+					// Message member doesn't exist
+					errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
+					return
+				}
+				handleContext.logger = logger.With(zap.String("userID", i.Member.User.ID))
+				var done context.CancelFunc
+				handleContext.Context, done = context.WithTimeout(ctx, time.Second*10)
+				defer done()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
+								Type: discordgo.InteractionResponseChannelMessageWithSource,
+								Data: &discordgo.InteractionResponseData{
+									Title:   "Panic",
+									Content: fmt.Sprintf("Panic while processing modal: %s", r),
+								},
+							})
+						}
+					}()
+					// Get Modal handle
+					if err := handle.HandleModal(handleContext, customID); err != nil {
+						var msg string
+						if pubErr, ok := err.(interface{ Public() string }); ok {
+							msg = pubErr.Public()
+						} else {
+							msg = err.Error()
+						}
+						_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseChannelMessageWithSource,
+							Data: &discordgo.InteractionResponseData{
+								Title:   "Error",
+								Content: msg,
+							},
+						})
+					}
+				}()
+			} else {
+				logger.Error("failed to find interaction")
+			}
 		}
 	})
 	// Add ready callback
@@ -194,10 +299,10 @@ func (b *Bot) Run(ctx context.Context) error {
 		log.Fatalf("Cannot open the session: %v", err)
 	}
 	defer session.Close()
-	errChan := make(chan error, len(b.handles))
+	errChan := make(chan error, len(b.baseHandles))
 	// Register application commands
-	for name, v := range b.handles {
-		command := v.Command.Command()
+	for name, v := range b.baseHandles {
+		command := v.Command()
 		command.Name = name
 		if cmd, err := session.ApplicationCommandCreate(session.State.User.ID, b.config.GuildID, command); err != nil {
 			return fmt.Errorf("failed to create %s command %w", name, err)
@@ -205,10 +310,10 @@ func (b *Bot) Run(ctx context.Context) error {
 			v.id = cmd.ID
 		}
 		// If the command is an advanced command, start it
-		base := reflect.ValueOf(v.Command)
+		base := reflect.ValueOf(v.BaseCommand)
 		if base.IsValid() {
 			baseInt := base.Interface()
-			if advanced, ok := baseInt.(AdvancedCommand); ok {
+			if advanced, ok := baseInt.(InitCommand); ok {
 				go func() {
 					err := advanced.Run(ctx, session)
 					errChan <- err
@@ -223,20 +328,11 @@ func (b *Bot) Run(ctx context.Context) error {
 		zap.L().Error("Error running command handler", zap.Error(err))
 	}
 	// Cleanup Session
-	for _, v := range b.handles {
+	for _, v := range b.baseHandles {
 		err := session.ApplicationCommandDelete(session.State.User.ID, b.config.GuildID, v.id)
 		if err != nil {
 			return fmt.Errorf("failed to delete %s command %w", v.Name(), err)
 		}
 	}
 	return nil
-}
-
-func contains[T comparable](x T, xs []T) bool {
-	for _, y := range xs {
-		if x == y {
-			return true
-		}
-	}
-	return false
 }

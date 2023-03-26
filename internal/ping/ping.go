@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/bobcob7/polly/pkg/discord"
+	"github.com/bobcob7/polly-bot/pkg/discord"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -24,12 +24,12 @@ func (p *Ping) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *Ping) Handle(ctx discord.Context) {
+func (p *Ping) Handle(ctx discord.Context) error {
 	p.Lock()
 	p.count++
 	currentCount := p.count
 	p.Unlock()
-	ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   fmt.Sprintf("Ping#%d", currentCount),

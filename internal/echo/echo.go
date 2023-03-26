@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bobcob7/polly/pkg/discord"
+	"github.com/bobcob7/polly-bot/pkg/discord"
 	"github.com/bwmarrin/discordgo"
 	"go.uber.org/zap"
 )
@@ -65,17 +65,10 @@ func (p *Echo) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *Echo) Handle(ctx discord.Context) {
+func (p *Echo) Handle(ctx discord.Context) error {
 	delay, err := time.ParseDuration(ctx.Interaction.ApplicationCommandData().Options[0].StringValue())
 	if err != nil {
-		ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Title:   "Error",
-				Content: fmt.Sprintf("Error parsing delay: %s", err),
-			},
-		})
-		return
+		return err
 	}
 	id := rand.Int()
 	ttl := time.Now().Add(delay)
@@ -85,7 +78,7 @@ func (p *Echo) Handle(ctx discord.Context) {
 		channelID: ctx.Interaction.ChannelID,
 	}
 	p.Unlock()
-	ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "...",

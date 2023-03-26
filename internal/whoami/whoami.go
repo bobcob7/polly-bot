@@ -3,9 +3,8 @@ package whoami
 import (
 	"fmt"
 
-	"github.com/bobcob7/polly/pkg/discord"
+	"github.com/bobcob7/polly-bot/pkg/discord"
 	"github.com/bwmarrin/discordgo"
-	"go.uber.org/zap"
 )
 
 type WhoAmI struct{}
@@ -21,7 +20,7 @@ func (p *WhoAmI) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *WhoAmI) Handle(ctx discord.Context) {
+func (p *WhoAmI) Handle(ctx discord.Context) error {
 	var user *discordgo.User
 	var roles []string
 	if ctx.Interaction.User != nil {
@@ -39,13 +38,11 @@ Roles:	%v`,
 		user.Email,
 		roles,
 	)
-	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "Who Am I?",
 			Content: content,
 		},
-	}); err != nil {
-		zap.L().Error("failed to respond to interaction", zap.Error(err))
-	}
+	})
 }

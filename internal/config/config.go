@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"strings"
 	"time"
 
-	"github.com/bobcob7/polly/pkg/discord"
+	"github.com/bobcob7/polly-bot/pkg/discord"
+	"github.com/upper/db/v4"
+	"github.com/upper/db/v4/adapter/cockroachdb"
+	"github.com/upper/db/v4/adapter/postgresql"
 )
 
 func New() *Config {
@@ -20,70 +22,94 @@ func New() *Config {
 }
 
 type Config struct {
-	RSSPeriod     string         `map:"RSS_PERIOD"`
-	HistoryLength int            `map:"HISTORY_LENGTH"`
-	Database      ConfigDatabase `map:"DATABASE"`
+	RSSPeriod     string `map:"RSS_PERIOD"`
+	HistoryLength int    `map:"HISTORY_LENGTH"`
+	Database      ConfigDatabase
 	Discord       discord.Config
 	Transmission  ConfigTransmission
+	GRPC          ConfigGRPC `map:"GRPC"`
+}
+
+type ConfigGRPC struct {
+	Address string
 }
 
 type ConfigDatabase struct {
-	Address          string
-	Port             int
-	Username         string
-	Password         string
-	Database         string
-	SSLMode          string `map:"SSL_MODE"`
-	ConnectionString string `map:"CONNECTION_STRING"`
+	Type     string
+	Address  string
+	Username string
+	Password string
+	Database string
+	SSLMode  string `map:"SSL_MODE"`
 }
 
 func (c ConfigDatabase) Valid() (errs Errors) {
-	if c.ConnectionString != "" {
-		if !schemaRe.MatchString(c.ConnectionString) {
-			errs.Add("ConnectionString must have a valid schema")
-		}
-	} else {
-		if c.Address == "" {
-			errs.Add("Address is required")
-		}
-		if c.Port <= 0 {
-			errs.Add("Port must be above 0")
-		}
-		if c.Port > 35565 {
-			errs.Add("Port must be below 35565")
-		}
-		if c.Username == "" {
-			errs.Add("Username is required")
-		}
-		if c.Database == "" {
-			errs.Add("Database is required")
-		}
+	if c.Address == "" {
+		errs.Add("Address is required")
+	}
+	if c.Username == "" {
+		errs.Add("Username is required")
+	}
+	if c.Database == "" {
+		errs.Add("Database is required")
+	}
+	if c.Type == "" {
+		errs.Add("Type is required")
+	}
+	switch c.Type {
+	case "postgres":
+	case "cockroachdb":
+	default:
+		errs.Add(fmt.Sprintln("Unsupported type:", c.Type))
 	}
 	return
 }
 
-func (c ConfigDatabase) String() string {
-	if c.ConnectionString != "" {
-		return c.ConnectionString
+func (c ConfigDatabase) Session() (db.Session, error) {
+	switch c.Type {
+	case "postgres":
+		return postgresql.Open(postgresql.ConnectionURL{
+			User:     c.Username,
+			Password: c.Password,
+			Host:     c.Address,
+			Database: c.Database,
+		})
+	case "cockroachdb":
+		return cockroachdb.Open(cockroachdb.ConnectionURL{
+			User:     c.Username,
+			Password: c.Password,
+			Host:     c.Address,
+			Database: c.Database,
+		})
 	}
-	credentials := c.Username
+	return nil, fmt.Errorf("Unsupported type: %s", c.Type)
+}
+
+func (c ConfigDatabase) URL() (string, error) {
+	var schema string
+	switch c.Type {
+	case "postgres":
+		schema = "postgres"
+	case "cockroachdb":
+		schema = "cockroachdb"
+	default:
+		return "", fmt.Errorf("Unsupported type: %s", c.Type)
+	}
+	credentials := url.PathEscape(c.Username)
 	if c.Password != "" {
-		credentials += ":" + c.Password
+		credentials += ":" + url.PathEscape(c.Password)
 	}
-	output := fmt.Sprintf("postgres://%s@%s:%d/%s", credentials, c.Address, c.Port, c.Database)
-	options := []string{}
+	connString := fmt.Sprintf("%s://%s@%s/%s", schema, credentials, c.Address, c.Database)
 	if c.SSLMode != "" {
-		options = append(options, "sslmode="+c.SSLMode)
+		connString += fmt.Sprintf("?sslmode=%s", c.SSLMode)
 	}
-	if len(options) > 0 {
-		output = output + "?" + strings.Join(options, "&")
-	}
-	return output
+	return connString, nil
 }
 
 type ConfigTransmission struct {
 	Endpoint          string
 	DownloadDirectory string
+	Scraper           ConfigTransmissionScraper
 }
 
 func (c ConfigTransmission) Valid() (errs Errors) {
@@ -94,6 +120,15 @@ func (c ConfigTransmission) Valid() (errs Errors) {
 	if c.DownloadDirectory == "" {
 		errs.Add("Transmission DownloadDirectory is required")
 	}
+	return
+}
+
+type ConfigTransmissionScraper struct {
+	MinPeriod time.Duration
+	MaxPeriod time.Duration
+}
+
+func (c ConfigTransmissionScraper) Valid() (errs Errors) {
 	return
 }
 
@@ -143,5 +178,6 @@ func (c Config) Valid() (errs Errors) {
 	}
 	errs.Append(c.Transmission.Valid())
 	errs.Add(c.Discord.Valid()...)
+	errs.Append(c.Database.Valid())
 	return
 }

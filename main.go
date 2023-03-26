@@ -10,16 +10,20 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/bobcob7/polly/internal/config"
-	"github.com/bobcob7/polly/internal/echo"
-	"github.com/bobcob7/polly/internal/mapper"
-	"github.com/bobcob7/polly/internal/ping"
-	"github.com/bobcob7/polly/internal/whoami"
-	"github.com/bobcob7/polly/pkg/discord"
-	"github.com/bobcob7/polly/pkg/transmission"
-	"github.com/golang-migrate/migrate"
+	"github.com/bobcob7/polly-bot/internal/config"
+	"github.com/bobcob7/polly-bot/internal/echo"
+	"github.com/bobcob7/polly-bot/internal/mapper"
+	"github.com/bobcob7/polly-bot/internal/ping"
+	"github.com/bobcob7/polly-bot/internal/reader"
+	"github.com/bobcob7/polly-bot/internal/server"
+	"github.com/bobcob7/polly-bot/internal/whoami"
+	"github.com/bobcob7/polly-bot/pkg/discord"
+	"github.com/bobcob7/transmission-rpc"
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/jackc/pgx/v4"
+	_ "github.com/lib/pq"
+	"github.com/upper/db/v4"
 	"go.uber.org/zap"
 )
 
@@ -28,25 +32,35 @@ var showVersion bool
 //go:embed migrations/*.sql
 var fs embed.FS
 
-func getDatabase(ctx context.Context, cfg config.ConfigDatabase) (*pgx.Conn, error) {
+func getDatabase(ctx context.Context, cfg config.ConfigDatabase) (db.Session, error) {
+	// Connect to DB
+	sess, err := cfg.Session()
+	if err != nil {
+		return nil, err
+	}
+	// Perform migration
+	// driver, err := postgres.WithInstance(sess, &postgres.Config{})
+	// m, err := migrate.NewWithDatabaseInstance(
+	// 	"file:///migrations",
+	// 	"postgres", driver)
+	// m.Up() // or m.Step(2) if you want to explicitly set the number of migrations to run
 	d, err := iofs.New(fs, "migrations")
 	if err != nil {
 		return nil, err
 	}
-	m, err := migrate.NewWithSourceInstance("iofs", d, cfg.String())
+	connString, err := cfg.URL()
 	if err != nil {
 		return nil, err
 	}
-	err = m.Up()
+	m, err := migrate.NewWithSourceInstance("iofs", d, connString)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := pgx.Connect(ctx, cfg.String())
-	if err != nil {
+	defer m.Close()
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		return nil, err
 	}
-	defer conn.Close(ctx)
-	return conn, nil
+	return sess, nil
 }
 
 func init() {
@@ -88,24 +102,38 @@ func main() {
 	ctx, done := context.WithCancel(context.Background())
 	defer done()
 	// Start database connection
-	conn, err := getDatabase(ctx, cfg.Database)
+	pool, err := getDatabase(ctx, cfg.Database)
 	if err != nil {
 		zap.L().Fatal("failed to connect to database", zap.Error(err))
 	}
 	// Start transmission interface
-	tr, err := transmission.New(ctx, cfg.Transmission.Endpoint, conn)
+	tx, err := transmission.New(ctx, cfg.Transmission.Endpoint)
 	if err != nil {
-		zap.L().Fatal("failed to connect to tranmission RPC server", zap.Error(err))
+		zap.L().Fatal("failed to connect to transmission RPC server", zap.Error(err))
 	}
+	// Start transmission/db interface
+	srv := server.New(cfg, pool, tx)
+	go func() {
+		if err := srv.Run(ctx); err != nil {
+			zap.L().Fatal("failed to startup RPC server", zap.Error(err))
+		}
+	}()
+
+	getAll := reader.NewGetAllCommand(pool)
+	addTorrent := reader.NewAddCommand(pool, tx)
+
 	// Start discord interface
 	bot := discord.New(
 		cfg.Discord,
 		&whoami.WhoAmI{},
 		&echo.Echo{},
 		&ping.Ping{},
-		&transmission.AddDownload{Transmission: tr},
-		&transmission.UnfinishedDownloads{Transmission: tr},
-		&transmission.SubscribeDownloads{Transmission: tr},
+		getAll,
+		addTorrent,
+
+		// &transmission.AddDownload{Transmission: tr},
+		// &transmission.UnfinishedDownloads{Transmission: tr},
+		// &transmission.SubscribeDownloads{Transmission: tr},
 	)
 	errChan := make(chan error, 1)
 	go func() {

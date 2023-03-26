@@ -1,0 +1,75 @@
+syntax = "proto3";
+package downloads.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service DownloadService {
+  rpc CreateDownload (CreateDownloadRequest) returns (CreateDownloadResponse) {}
+  rpc DeleteDownload (DeleteDownloadRequest) returns (DeleteDownloadResponse) {}
+  rpc GetDownloads (GetDownloadsRequest) returns (GetDownloadsResponse) {}
+}
+
+enum DownloadCategory {
+  DOWNLOAD_CATEGORY_UNSPECIFIED = 0;
+  DOWNLOAD_CATEGORY_MOVIE = 1;
+  DOWNLOAD_CATEGORY_TV_SHOW = 2;
+  DOWNLOAD_CATEGORY_MUSIC = 3;
+  DOWNLOAD_CATEGORY_GAME = 4;
+  DOWNLOAD_CATEGORY_SOFTWARE = 5;
+}
+
+message DownloadMetadata {
+  string name = 1;
+  map<string,string> labels = 2;
+  repeated DownloadCategory categories = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp completed_at = 6;
+  google.protobuf.Timestamp deleted_at = 7;
+}
+
+enum DownloadStatus {
+  DOWNLOAD_STATUS_UNSPECIFIED    = 0;
+  DOWNLOAD_STATUS_STOPPED        = 1;
+  DOWNLOAD_STATUS_CHECK_WAIT     = 2;
+  DOWNLOAD_STATUS_CHECK          = 3;
+  DOWNLOAD_STATUS_DOWNLOAD_WAIT  = 4;
+  DOWNLOAD_STATUS_DOWNLOAD       = 5;
+  DOWNLOAD_STATUS_SEED_WAIT      = 6;
+  DOWNLOAD_STATUS_SEED           = 7;
+}
+
+message Download {
+  string id = 1;
+  DownloadMetadata metadata = 2;
+  DownloadStatus status = 3;
+  string magnet_link = 4;
+  uint64 size = 5;
+  uint64 downloaded = 6;
+  uint64 uploaded = 7;
+  double progress = 8;
+  double ratio = 9;
+}
+
+message CreateDownloadRequest {
+  string magnet_link = 1;
+}
+
+message CreateDownloadResponse {
+  Download download = 1;
+}
+
+message DeleteDownloadRequest {
+  string id = 1;
+}
+
+message DeleteDownloadResponse {}
+
+message GetDownloadsRequest {
+  repeated string ids = 1;
+  repeated DownloadStatus statuses = 2;
+}
+
+message GetDownloadsResponse {
+  repeated Download downloads = 1;
+}
