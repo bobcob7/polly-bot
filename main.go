@@ -74,10 +74,7 @@ func init() {
 
 func main() {
 	flag.Parse()
-	if showVersion {
-		fmt.Println("0.0.2")
-		os.Exit(0)
-	}
+	fmt.Println("0.0.3")
 	cfg := config.New()
 	dec := mapper.NewDecoder(os.LookupEnv, mapper.WithTagDefaulter(strings.ToUpper))
 	if err := dec.Decode(cfg); err != nil {
