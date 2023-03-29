@@ -204,6 +204,7 @@ func (b *Bot) Run(ctx context.Context) error {
 							_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
 								Type: discordgo.InteractionResponseChannelMessageWithSource,
 								Data: &discordgo.InteractionResponseData{
+									Flags:   discordgo.MessageFlagsEphemeral,
 									Title:   "Panic",
 									Content: fmt.Sprintf("Panic while processing command: %s", r),
 								},
@@ -221,6 +222,7 @@ func (b *Bot) Run(ctx context.Context) error {
 						_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
 							Type: discordgo.InteractionResponseChannelMessageWithSource,
 							Data: &discordgo.InteractionResponseData{
+								Flags:   discordgo.MessageFlagsEphemeral,
 								Title:   "Error",
 								Content: msg,
 							},
@@ -262,6 +264,7 @@ func (b *Bot) Run(ctx context.Context) error {
 							_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
 								Type: discordgo.InteractionResponseChannelMessageWithSource,
 								Data: &discordgo.InteractionResponseData{
+									Flags:   discordgo.MessageFlagsEphemeral,
 									Title:   "Panic",
 									Content: fmt.Sprintf("Panic while processing modal: %s", r),
 								},
@@ -279,6 +282,7 @@ func (b *Bot) Run(ctx context.Context) error {
 						_ = handleContext.Session.InteractionRespond(handleContext.Interaction, &discordgo.InteractionResponse{
 							Type: discordgo.InteractionResponseChannelMessageWithSource,
 							Data: &discordgo.InteractionResponseData{
+								Flags:   discordgo.MessageFlagsEphemeral,
 								Title:   "Error",
 								Content: msg,
 							},

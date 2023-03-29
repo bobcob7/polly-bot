@@ -69,6 +69,7 @@ func (p *GetAllCommand) Handle(ctx discord.Context) error {
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   title,
+			Flags:   discordgo.MessageFlagsEphemeral,
 			Content: strings.Join(content, "\n"),
 		},
 	})

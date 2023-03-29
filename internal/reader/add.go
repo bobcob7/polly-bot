@@ -91,6 +91,10 @@ func (p *AddCommand) Handle(ctx discord.Context) error {
 	p.customIDs[customID] = struct{}{}
 	logger.Debug("sending interaction")
 
+	if len(displayName) > 100 {
+		displayName = displayName[:99]
+	}
+
 	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
