@@ -1,4 +1,4 @@
-FROM golang:1.18-alpine as builder
+FROM golang:1.20-alpine as builder
 # Create appuser.
 ENV USER=appuser
 ENV UID=10001 
@@ -12,14 +12,12 @@ RUN adduser \
     --uid "${UID}" \    
     "${USER}"
 RUN apk update && apk add --no-cache git ca-certificates && update-ca-certificates
-# RUN apt-get update && apt-get install git ca-certificates && update-ca-certificates
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 RUN go mod verify
 COPY . .
 RUN go build -o polly .
-# RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o polly .
 
 FROM alpine:latest
 USER appuser:appuser
