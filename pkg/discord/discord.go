@@ -9,44 +9,24 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/upper/db/v4"
 	"go.uber.org/zap"
 )
 
 type Config struct {
-	Token   string
-	GuildID string `map:"GUILD_ID"`
+	Token             string
+	GuildID           string `map:"GUILD_ID"`
+	PrivateChannelTTL int    `map:"PRIVATE_CHANNEL_TTL"`
 }
 
 func (c Config) Valid() (errs []string) {
 	if c.Token == "" {
 		errs = append(errs, "Discord Token is required")
 	}
-	return
-}
-
-type Context struct {
-	//nolint: containedctx
-	context.Context
-	*discordgo.Session
-	*discordgo.InteractionCreate
-	logger *zap.Logger
-}
-
-func (c *Context) Logger() *zap.Logger {
-	return c.logger
-}
-
-func (c *Context) Error(err error) {
-	c.logger.Info("Failed with error", zap.Error(err))
-	if err := c.Session.InteractionRespond(c.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Title:   "Error",
-			Content: err.Error(),
-		},
-	}); err != nil {
-		c.logger.Error("Failed to respond with error", zap.Error(err))
+	if c.PrivateChannelTTL == 0 {
+		errs = append(errs, "Private Channel TTL is required")
 	}
+	return
 }
 
 type BaseCommand interface {
@@ -113,20 +93,35 @@ func (b *Bot) registerHandles(commands ...BaseCommand) {
 }
 
 type Bot struct {
-	config       Config
-	guildRoleMap map[string][]string
-	baseHandles  map[string]registeredCommand
-	initHandles  map[string]InitCommand
-	modalHandles map[string]ModalCommand
+	config           Config
+	privateMessenger PrivateMessenger
+	guildRoleMap     map[string][]string
+	baseHandles      map[string]registeredCommand
+	initHandles      map[string]InitCommand
+	modalHandles     map[string]ModalCommand
+	onStartHooks     map[string]Starter
 }
 
-func New(config Config, cmds ...BaseCommand) *Bot {
+func New(config Config, sess db.Session, cmds ...BaseCommand) *Bot {
 	b := &Bot{
-		config:       config,
+		config: config,
+		privateMessenger: PrivateMessenger{
+			privateChannelTTL: time.Duration(config.PrivateChannelTTL) * time.Second,
+			sess:              sess,
+		},
 		guildRoleMap: map[string][]string{},
+		onStartHooks: make(map[string]Starter),
 	}
 	b.registerHandles(cmds...)
 	return b
+}
+
+type Starter interface {
+	OnStart(ctx Context, s *discordgo.Session) error
+}
+
+func (b *Bot) OnStartHook(name string, hook Starter) {
+	b.onStartHooks[name] = hook
 }
 
 func GetGuilds(token string) (map[string]string, error) {
@@ -191,6 +186,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				handleContext := Context{
 					Session:           s,
 					InteractionCreate: i,
+					PrivateMessenger:  &b.privateMessenger,
 				}
 				if i.Member == nil || i.Member.User == nil {
 					// Message member doesn't exist
@@ -253,6 +249,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				handleContext := Context{
 					Session:           s,
 					InteractionCreate: i,
+					PrivateMessenger:  &b.privateMessenger,
 				}
 				if i.Member == nil || i.Member.User == nil {
 					// Message member doesn't exist
@@ -331,17 +328,41 @@ func (b *Bot) Run(ctx context.Context) error {
 			}
 		}
 	}
-	// Wait for context to be cancelled
-	select {
-	case <-ctx.Done():
-	case err := <-errChan:
-		zap.L().Error("Error running command handler", zap.Error(err))
-	}
 	// Cleanup Session
-	for _, v := range b.baseHandles {
-		err := session.ApplicationCommandDelete(session.State.User.ID, b.config.GuildID, v.id)
-		if err != nil {
-			return fmt.Errorf("failed to delete %s command %w", v.Name(), err)
+	defer func() {
+		for _, v := range b.baseHandles {
+			err := session.ApplicationCommandDelete(session.State.User.ID, b.config.GuildID, v.id)
+			if err != nil {
+				zap.L().Error("failed to delete command", zap.String("name", v.Name()), zap.Error(err))
+			}
+		}
+	}()
+	// Run onStart hooks
+	for name, hook := range b.onStartHooks {
+		hookContext := Context{
+			Context:          ctx,
+			Session:          session,
+			PrivateMessenger: &b.privateMessenger,
+			logger:           zap.L().With(zap.String("onStartHook", name)),
+		}
+		if err := hook.OnStart(hookContext, session); err != nil {
+			return fmt.Errorf("failed onStart hook %q: %w", name, err)
+		}
+	}
+	// Wait for context to be cancelled
+	ticker := time.NewTicker(time.Second * 10)
+	defer ticker.Stop()
+botLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			break botLoop
+		case <-ticker.C:
+			if err := b.privateMessenger.garbageCollect(ctx, session); err != nil {
+				zap.L().Error("Error collecting private messenger garbage", zap.Error(err))
+			}
+		case err := <-errChan:
+			zap.L().Error("Error running command handler", zap.Error(err))
 		}
 	}
 	return nil

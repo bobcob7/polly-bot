@@ -102,11 +102,15 @@ func (t *Torrent) String() string {
 	} else {
 		completedString = fmt.Sprintf("%d%% downloaded", uint(percentCompleted*100))
 	}
-	friendlyName := t.Name
+	return fmt.Sprintf("%s: %s", t.NameString(), completedString)
+}
+
+func (t *Torrent) NameString() (name string) {
+	name = t.Name
 	if t.TorrentMetadata != nil && t.TorrentMetadata.FriendlyName != "" {
-		friendlyName = t.TorrentMetadata.FriendlyName
+		name = t.TorrentMetadata.FriendlyName
 	}
-	return fmt.Sprintf("%s: %s", friendlyName, completedString)
+	return
 }
 
 func (t *Torrent) Equal(s Torrent) bool {
@@ -274,8 +278,9 @@ func (t torrentCategories) Diff(id string, existingCategories torrentCategories)
 	return
 }
 
-func (t *Torrent) Set(ctx context.Context, sess db.Session) error {
+func (t *Torrent) Set(ctx context.Context, sess db.Session) (bool, error) {
 	t.setRawValues()
+	var completed bool
 	err := sess.TxContext(ctx, func(sess db.Session) error {
 		// Get current torrent record
 		var existing Torrent
@@ -290,6 +295,9 @@ func (t *Torrent) Set(ctx context.Context, sess db.Session) error {
 			}
 			if t.TorrentMetadata == nil {
 				t.TorrentMetadata = existing.TorrentMetadata
+			}
+			if existing.CompletedAt == nil && t.CompletedAt != nil {
+				completed = true
 			}
 			// Diff to see update can be skipped
 			if t.Equal(existing) {
@@ -330,9 +338,9 @@ func (t *Torrent) Set(ctx context.Context, sess db.Session) error {
 		return nil
 	}, nil)
 	if err != nil {
-		return fmt.Errorf("failed db session: %w", err)
+		return false, fmt.Errorf("failed db session: %w", err)
 	}
-	return nil
+	return completed, nil
 }
 
 func (t *Torrent) Get(ctx context.Context, sess db.Session) error {

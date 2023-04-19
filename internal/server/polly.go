@@ -21,10 +21,11 @@ import (
 type Server struct {
 	downloadsv1connect.UnimplementedDownloadServiceHandler
 
-	logger *zap.Logger
-	config config.GRPC
-	sess   db.Session
-	tx     *transmission.Client
+	logger            *zap.Logger
+	config            config.GRPC
+	sess              db.Session
+	tx                *transmission.Client
+	completedTorrents chan<- *models.Torrent
 }
 
 var _ downloadsv1connect.DownloadServiceHandler = &Server{}
@@ -97,8 +98,12 @@ func (s *Server) scrape(ctx context.Context) error {
 	s.logger.Debug("scraped torrents from transmission", zap.Int("num_torrents", len(torrents)))
 	for _, torrent := range torrents {
 		newTorrent := models.FromTransmission(torrent)
-		if err := newTorrent.Set(ctx, s.sess); err != nil {
+		completed, err := newTorrent.Set(ctx, s.sess)
+		if err != nil {
 			return fmt.Errorf("failed setting torrent in db: %w", err)
+		}
+		if completed && s.completedTorrents != nil {
+			s.completedTorrents <- newTorrent
 		}
 	}
 	return nil
@@ -106,11 +111,16 @@ func (s *Server) scrape(ctx context.Context) error {
 
 func New(cfg *config.Config, sess db.Session, tx *transmission.Client) *Server {
 	return &Server{
-		logger: zap.L(),
-		tx:     tx,
-		sess:   sess,
-		config: cfg.GRPC,
+		logger:            zap.L(),
+		tx:                tx,
+		sess:              sess,
+		config:            cfg.GRPC,
+		completedTorrents: nil,
 	}
+}
+
+func (s *Server) SubscribeCompletedTorrents(c chan<- *models.Torrent) {
+	s.completedTorrents = c
 }
 
 var errUnimplemented = errors.New("method is not implemented")

@@ -10,6 +10,7 @@ import (
 	"github.com/bobcob7/polly-bot/pkg/discord"
 	"github.com/bobcob7/transmission-rpc"
 	"github.com/bwmarrin/discordgo"
+	"github.com/google/uuid"
 	"github.com/upper/db/v4"
 	"go.uber.org/zap"
 )
@@ -95,7 +96,7 @@ func (p *AddCommand) Handle(ctx discord.Context) error {
 							Value:     displayName,
 							Required:  true,
 							MaxLength: 100,
-							MinLength: 5,
+							MinLength: 3,
 						},
 					},
 				},
@@ -193,8 +194,17 @@ func (p *AddCommand) HandleModal(ctx discord.Context, id string) error {
 	}
 	newTorrent := models.FromTransmission(torrents[0])
 	newTorrent.TorrentMetadata = meta
-	if err := newTorrent.Set(ctx, p.sess); err != nil {
+	if _, err := newTorrent.Set(ctx, p.sess); err != nil {
 		return fmt.Errorf("failed to set in db: %w", err)
+	}
+	notification := models.TorrentNotification{
+		ID:          uuid.NewString(),
+		TorrentID:   newTorrent.ID,
+		RecipientID: ctx.UserID(),
+		ChannelID:   ctx.ChannelID(),
+	}
+	if err := notification.Create(ctx, p.sess); err != nil {
+		return fmt.Errorf("failed to create notification: %w", err)
 	}
 	if err := ctx.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,

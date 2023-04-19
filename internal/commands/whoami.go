@@ -38,6 +38,9 @@ Roles:	%v`,
 		user.Email,
 		roles,
 	)
+	if err := ctx.PrivateMessenger.SendMessage(ctx, ctx.Interaction.Member.User.ID, content); err != nil {
+		return failedResponseInteractionError{err}
+	}
 	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{

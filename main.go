@@ -55,8 +55,10 @@ func getDatabase(cfg config.Database) (db.Session, error) {
 		return nil, fmt.Errorf("failed creating new migration source: %w", err)
 	}
 	defer m.Close()
-	if err := m.Up(); err != nil && errors.Is(err, migrate.ErrNoChange) {
-		return nil, fmt.Errorf("failed to run migration: %w", err)
+	if err := m.Up(); err != nil {
+		if !errors.Is(err, migrate.ErrNoChange) {
+			return nil, fmt.Errorf("failed to run migration: %w", err)
+		}
 	}
 	return sess, nil
 }
@@ -115,10 +117,13 @@ func main() {
 
 	getAll := commands.NewGetAllCommand(pool)
 	addTorrent := commands.NewAddCommand(pool, transmissionClient)
+	notifier := commands.NewTorrentNotifier(pool)
+	srv.SubscribeCompletedTorrents(notifier.CompletedTorrents)
 
 	// Start discord interface
 	bot := discord.New(
 		cfg.Discord,
+		pool,
 		&commands.WhoAmI{},
 		&commands.Echo{},
 		&commands.Ping{},
@@ -129,6 +134,7 @@ func main() {
 		// &transmission.UnfinishedDownloads{Transmission: tr},
 		// &transmission.SubscribeDownloads{Transmission: tr},
 	)
+	bot.OnStartHook("torrentNotifier", notifier)
 	errChan := make(chan error, 1)
 	go func() {
 		defer close(errChan)
