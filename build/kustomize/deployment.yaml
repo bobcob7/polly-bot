@@ -51,7 +51,7 @@ spec:
         - name: DATABASE_ADDRESS
           value: postgres-db.database
         - name: DISCORD_PRIVATE_CHANNEL_TTL
-          value: 600
+          value: "600"
         resources:
           limits:
             cpu: 2000m

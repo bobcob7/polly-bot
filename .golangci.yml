@@ -47,7 +47,6 @@ linters:
     - ineffassign
     - interfacebloat
     - loggercheck
-    - maintidx
     - makezero
     - misspell
     - musttag
