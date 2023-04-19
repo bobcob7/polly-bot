@@ -1,4 +1,4 @@
-package echo
+package commands
 
 import (
 	"context"
@@ -18,7 +18,7 @@ type Job struct {
 }
 
 type Echo struct {
-	sync.Mutex
+	lock sync.Mutex
 	jobs map[string]Job
 }
 
@@ -30,18 +30,18 @@ func (p *Echo) Run(ctx context.Context, s *discordgo.Session) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			p.Lock()
+			p.lock.Lock()
 			for id, job := range p.jobs {
 				if job.ttl.Before(time.Now()) {
 					zap.L().Debug("echo finished", zap.String("id", id))
 					delete(p.jobs, id)
 					_, err := s.ChannelMessageSend(job.channelID, fmt.Sprintf("Echo %s", id))
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to send channel response: %w", err)
 					}
 				}
 			}
-			p.Unlock()
+			p.lock.Unlock()
 		}
 	}
 }
@@ -66,23 +66,29 @@ func (p *Echo) Command() *discordgo.ApplicationCommand {
 }
 
 func (p *Echo) Handle(ctx discord.Context) error {
-	delay, err := time.ParseDuration(ctx.Interaction.ApplicationCommandData().Options[0].StringValue())
+	input := ctx.Interaction.ApplicationCommandData().Options[0].StringValue()
+	delay, err := time.ParseDuration(input)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse input duration %q: %w", input, err)
 	}
+	//nolint: gosec
 	id := rand.Int()
 	ttl := time.Now().Add(delay)
-	p.Lock()
+	p.lock.Lock()
 	p.jobs[fmt.Sprintf("%d", id)] = Job{
 		ttl:       ttl,
 		channelID: ctx.Interaction.ChannelID,
 	}
-	p.Unlock()
-	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	p.lock.Unlock()
+	err = ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "...",
 			Content: fmt.Sprintf("...%d...", id),
 		},
 	})
+	if err != nil {
+		return failedResponseInteractionError{err}
+	}
+	return nil
 }

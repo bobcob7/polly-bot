@@ -2,6 +2,7 @@ package mapper
 
 import (
 	"encoding/base64"
+	"fmt"
 	"reflect"
 	"strconv"
 )
@@ -56,7 +57,8 @@ func (d *Decoder) Decode(v interface{}) error {
 func (d *Decoder) decode(root string, v reflect.Value) (bool, error) {
 	var found bool
 	var err error
-	if v.Kind() == reflect.Ptr {
+	switch v.Kind() {
+	case reflect.Ptr:
 		value := reflect.New(v.Elem().Type()).Elem()
 		found, err = d.decode(root, value)
 		if err != nil {
@@ -65,7 +67,7 @@ func (d *Decoder) decode(root string, v reflect.Value) (bool, error) {
 		if found {
 			v.Elem().Set(value)
 		}
-	} else if v.Kind() == reflect.Struct {
+	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			f := v.Field(i)
 			subKey, ok := v.Type().Field(i).Tag.Lookup("map")
@@ -79,15 +81,16 @@ func (d *Decoder) decode(root string, v reflect.Value) (bool, error) {
 			if root != "" {
 				subKey = root + d.separator + subKey
 			}
-			if f.Kind() == reflect.Struct {
+			switch f.Kind() {
+			case reflect.Struct:
 				if found, err = d.decode(subKey, f); err != nil {
 					return false, err
 				}
-			} else if f.Kind() == reflect.Slice {
+			case reflect.Slice:
 				if found, err = d.decode(subKey, f); err != nil {
 					return false, err
 				}
-			} else if f.Kind() == reflect.Ptr {
+			case reflect.Ptr:
 				value := reflect.New(f.Type().Elem())
 				found, err := d.decode(subKey, value)
 				if err != nil {
@@ -96,13 +99,13 @@ func (d *Decoder) decode(root string, v reflect.Value) (bool, error) {
 				if found {
 					f.Set(value)
 				}
-			} else {
+			default:
 				if found, err = d.decodePrimitive(subKey, f); err != nil {
 					return false, err
 				}
 			}
 		}
-	} else if v.Kind() == reflect.Slice {
+	case reflect.Slice:
 		sliceType := v.Type().Elem()
 		found = true
 		// Check if it might be a binary
@@ -112,7 +115,7 @@ func (d *Decoder) decode(root string, v reflect.Value) (bool, error) {
 			if found {
 				bytes, err := base64.StdEncoding.DecodeString(value)
 				if err != nil {
-					return false, err
+					return false, fmt.Errorf("failed decoding base64 string: %w", err)
 				}
 				v.SetBytes(bytes)
 				return true, nil
@@ -129,7 +132,7 @@ func (d *Decoder) decode(root string, v reflect.Value) (bool, error) {
 			}
 		}
 		found = v.Len() > 0
-	} else {
+	default:
 		return d.decodePrimitive(root, v)
 	}
 	return found, nil
@@ -144,7 +147,7 @@ func (d *Decoder) decodePrimitive(key string, v reflect.Value) (bool, error) {
 	case reflect.Bool:
 		decodedValue, err := strconv.ParseBool(value)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed parsing bool: %w", err)
 		}
 		v.SetBool(decodedValue)
 	case reflect.Int:
@@ -158,7 +161,7 @@ func (d *Decoder) decodePrimitive(key string, v reflect.Value) (bool, error) {
 	case reflect.Int64:
 		decodedValue, err := strconv.ParseInt(value, 10, v.Type().Bits())
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed parsing int64: %w", err)
 		}
 		v.SetInt(decodedValue)
 	case reflect.Uint:
@@ -172,7 +175,7 @@ func (d *Decoder) decodePrimitive(key string, v reflect.Value) (bool, error) {
 	case reflect.Uint64:
 		decodedValue, err := strconv.ParseUint(value, 10, v.Type().Bits())
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed parsing uint64: %w", err)
 		}
 		v.SetUint(decodedValue)
 	case reflect.Float32:
@@ -180,7 +183,7 @@ func (d *Decoder) decodePrimitive(key string, v reflect.Value) (bool, error) {
 	case reflect.Float64:
 		decodedValue, err := strconv.ParseFloat(value, v.Type().Bits())
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed parsing float64: %w", err)
 		}
 		v.SetFloat(decodedValue)
 	case reflect.Complex64:
@@ -188,7 +191,7 @@ func (d *Decoder) decodePrimitive(key string, v reflect.Value) (bool, error) {
 	case reflect.Complex128:
 		decodedValue, err := strconv.ParseComplex(value, v.Type().Bits())
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed parsing complex128: %w", err)
 		}
 		v.SetComplex(decodedValue)
 	case reflect.String:

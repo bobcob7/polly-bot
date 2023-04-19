@@ -4,7 +4,6 @@ package downloads.v1;
 import "google/protobuf/timestamp.proto";
 
 service DownloadService {
-  rpc CreateDownload (CreateDownloadRequest) returns (CreateDownloadResponse) {}
   rpc DeleteDownload (DeleteDownloadRequest) returns (DeleteDownloadResponse) {}
   rpc GetDownloads (GetDownloadsRequest) returns (GetDownloadsResponse) {}
 }
@@ -49,14 +48,6 @@ message Download {
   uint64 uploaded = 7;
   double progress = 8;
   double ratio = 9;
-}
-
-message CreateDownloadRequest {
-  string magnet_link = 1;
-}
-
-message CreateDownloadResponse {
-  Download download = 1;
 }
 
 message DeleteDownloadRequest {

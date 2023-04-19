@@ -1,4 +1,4 @@
-package whoami
+package commands
 
 import (
 	"fmt"
@@ -38,11 +38,14 @@ Roles:	%v`,
 		user.Email,
 		roles,
 	)
-	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   "Who Am I?",
 			Content: content,
 		},
-	})
+	}); err != nil {
+		return failedResponseInteractionError{err}
+	}
+	return nil
 }

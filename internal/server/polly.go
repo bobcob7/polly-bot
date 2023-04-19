@@ -2,32 +2,32 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
+	"net/http"
 	"time"
 
 	"github.com/bobcob7/polly-bot/internal/config"
 	"github.com/bobcob7/polly-bot/internal/models"
 	downloadsv1 "github.com/bobcob7/polly-bot/pkg/proto/downloads/v1"
+	"github.com/bobcob7/polly-bot/pkg/proto/downloads/v1/downloadsv1connect"
 	"github.com/bobcob7/transmission-rpc"
-	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
-	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
+	"github.com/bufbuild/connect-go"
 	"github.com/upper/db/v4"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 type Server struct {
-	downloadsv1.UnimplementedDownloadServiceServer
+	downloadsv1connect.UnimplementedDownloadServiceHandler
 
 	logger *zap.Logger
-	config config.ConfigGRPC
+	config config.GRPC
 	sess   db.Session
 	tx     *transmission.Client
 }
 
-var _ downloadsv1.DownloadServiceServer = &Server{}
+var _ downloadsv1connect.DownloadServiceHandler = &Server{}
 
 func (s *Server) Run(ctx context.Context) error {
 	err := make(chan error, 2)
@@ -41,19 +41,21 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) RunGRPC(ctx context.Context) error {
-	server := grpc.NewServer(
-		grpc.UnaryInterceptor(middleware.ChainUnaryServer(
-			grpc_recovery.UnaryServerInterceptor(),
-			grpc_opentracing.UnaryServerInterceptor(),
-			grpc_zap.UnaryServerInterceptor(s.logger),
-		)),
-	)
 	listener, err := net.Listen("tcp", s.config.Address)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to listen: %w", err)
 	}
-	downloadsv1.RegisterDownloadServiceServer(server, s)
-	return server.Serve(listener)
+	mux := http.NewServeMux()
+	mux.Handle(downloadsv1connect.NewDownloadServiceHandler(s))
+	server := &http.Server{
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+	if err := server.Serve(listener); err != nil {
+		return fmt.Errorf("failed to server: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) RunScraper(ctx context.Context) error {
@@ -63,7 +65,10 @@ func (s *Server) RunScraper(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("context error: %w", err)
+			}
+			return nil
 		default:
 		}
 		err := s.scrape(ctx)
@@ -87,13 +92,13 @@ func (s *Server) RunScraper(ctx context.Context) error {
 func (s *Server) scrape(ctx context.Context) error {
 	torrents, err := s.tx.GetTorrents(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to scrape torrents from transmission: %w", err)
 	}
 	s.logger.Debug("scraped torrents from transmission", zap.Int("num_torrents", len(torrents)))
 	for _, torrent := range torrents {
 		newTorrent := models.FromTransmission(torrent)
 		if err := newTorrent.Set(ctx, s.sess); err != nil {
-			return err
+			return fmt.Errorf("failed setting torrent in db: %w", err)
 		}
 	}
 	return nil
@@ -108,14 +113,12 @@ func New(cfg *config.Config, sess db.Session, tx *transmission.Client) *Server {
 	}
 }
 
-func (s *Server) CreateDownload(ctx context.Context, request *downloadsv1.CreateDownloadRequest) (*downloadsv1.CreateDownloadResponse, error) {
-	return nil, nil
+var errUnimplemented = errors.New("method is not implemented")
+
+func (s *Server) DeleteDownload(context.Context, *connect.Request[downloadsv1.DeleteDownloadRequest]) (*connect.Response[downloadsv1.DeleteDownloadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errUnimplemented)
 }
 
-func (s *Server) DeleteDownload(ctx context.Context, request *downloadsv1.DeleteDownloadRequest) (*downloadsv1.DeleteDownloadResponse, error) {
-	return nil, nil
-}
-
-func (s *Server) GetDownloads(ctx context.Context, request *downloadsv1.GetDownloadsRequest) (*downloadsv1.GetDownloadsResponse, error) {
-	return nil, nil
+func (s *Server) GetDownloads(context.Context, *connect.Request[downloadsv1.GetDownloadsRequest]) (*connect.Response[downloadsv1.GetDownloadsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errUnimplemented)
 }

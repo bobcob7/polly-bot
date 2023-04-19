@@ -6,6 +6,7 @@ import (
 )
 
 func TestTorrent_String(t *testing.T) {
+	t.Parallel()
 	type fields struct {
 		TorrentMetadata *TorrentMetadata
 		ID              string
@@ -73,22 +74,24 @@ func TestTorrent_String(t *testing.T) {
 		},
 	}
 	for name, tt := range tests {
+		testData := tt
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			tr := &Torrent{
-				TorrentMetadata: tt.fields.TorrentMetadata,
-				ID:              tt.fields.ID,
-				Name:            tt.fields.Name,
-				CreatedAt:       tt.fields.CreatedAt,
-				StartedAt:       tt.fields.StartedAt,
-				CompletedAt:     tt.fields.CompletedAt,
-				Status:          tt.fields.Status,
-				MagnetLink:      tt.fields.MagnetLink,
-				TotalSize:       tt.fields.TotalSize,
-				Downloaded:      tt.fields.Downloaded,
-				Uploaded:        tt.fields.Uploaded,
+				TorrentMetadata: testData.fields.TorrentMetadata,
+				ID:              testData.fields.ID,
+				Name:            testData.fields.Name,
+				CreatedAt:       testData.fields.CreatedAt,
+				StartedAt:       testData.fields.StartedAt,
+				CompletedAt:     testData.fields.CompletedAt,
+				Status:          testData.fields.Status,
+				MagnetLink:      testData.fields.MagnetLink,
+				TotalSize:       testData.fields.TotalSize,
+				Downloaded:      testData.fields.Downloaded,
+				Uploaded:        testData.fields.Uploaded,
 			}
-			if got := tr.String(); got != tt.want {
-				t.Errorf("Torrent.String() = %v, want %v", got, tt.want)
+			if got := tr.String(); got != testData.want {
+				t.Errorf("Torrent.String() = %v, want %v", got, testData.want)
 			}
 		})
 	}

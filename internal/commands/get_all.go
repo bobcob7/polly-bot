@@ -1,4 +1,4 @@
-package reader
+package commands
 
 import (
 	"fmt"
@@ -39,7 +39,7 @@ func (p *GetAllCommand) Command() *discordgo.ApplicationCommand {
 	}
 }
 
-func (p *GetAllCommand) Handle(ctx discord.Context) {
+func (p *GetAllCommand) Handle(ctx discord.Context) error {
 	// Get finished input
 	args := make([]interface{}, 0)
 	if len(ctx.Interaction.ApplicationCommandData().Options) != 0 {
@@ -53,7 +53,7 @@ func (p *GetAllCommand) Handle(ctx discord.Context) {
 
 	torrents, err := models.GetTorrents(ctx, p.sess, args...)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("failed to get torrents from db: %w", err)
 	}
 	title := fmt.Sprintf("Found %d torrents", len(torrents))
 	content := make([]string, 0, len(torrents))
@@ -65,13 +65,16 @@ func (p *GetAllCommand) Handle(ctx discord.Context) {
 		content = append(content, "No torrents found")
 	}
 
-	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	err = ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   title,
+			Flags:   discordgo.MessageFlagsEphemeral,
 			Content: strings.Join(content, "\n"),
 		},
-	}); err != nil {
-		panic(err)
+	})
+	if err != nil {
+		return failedResponseInteractionError{err}
 	}
+	return nil
 }

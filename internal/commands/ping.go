@@ -1,4 +1,4 @@
-package ping
+package commands
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 )
 
 type Ping struct {
-	sync.Mutex
+	lock  sync.Mutex
 	count int
 }
 
@@ -25,15 +25,18 @@ func (p *Ping) Command() *discordgo.ApplicationCommand {
 }
 
 func (p *Ping) Handle(ctx discord.Context) error {
-	p.Lock()
+	p.lock.Lock()
 	p.count++
 	currentCount := p.count
-	p.Unlock()
-	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	p.lock.Unlock()
+	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Title:   fmt.Sprintf("Ping#%d", currentCount),
 			Content: fmt.Sprintf("Pong - %d", currentCount),
 		},
-	})
+	}); err != nil {
+		return failedResponseInteractionError{err}
+	}
+	return nil
 }

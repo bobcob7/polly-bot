@@ -42,6 +42,7 @@ func ExampleNewDecoder() {
 }
 
 func Test_Decoder(t *testing.T) {
+	t.Parallel()
 	type testSubStruct struct {
 		String string `map:"string"`
 	}
@@ -127,6 +128,7 @@ func Test_Decoder(t *testing.T) {
 }
 
 func Test_Default_Tag(t *testing.T) {
+	t.Parallel()
 	type testTaglessStruct struct {
 		String string
 	}
@@ -147,6 +149,7 @@ func Test_Default_Tag(t *testing.T) {
 }
 
 func Test_Tag_Defaulter(t *testing.T) {
+	t.Parallel()
 	type testTaglessStruct struct {
 		String string
 	}
@@ -169,6 +172,7 @@ func Test_Tag_Defaulter(t *testing.T) {
 }
 
 func Test_Cool_Separator(t *testing.T) {
+	t.Parallel()
 	type testSubStruct struct {
 		String string `map:"string"`
 	}

@@ -6,18 +6,28 @@ import (
 	"net/url"
 )
 
+var errMissingDNQuery = errors.New("missing 'dn' query parameter")
+
+type unexpectedSchemeError struct {
+	scheme string
+}
+
+func (u unexpectedSchemeError) Error() string {
+	return fmt.Sprintf("unexpected scheme got=%q want=%q", u.scheme, "magnet")
+}
+
 func MagnetURIDisplayName(uri string) (string, error) {
-	u, err := url.Parse(uri)
+	parsedURI, err := url.Parse(uri)
 	if err != nil {
 		return "", fmt.Errorf("error parsing uri: %w", err)
 	}
-	if u.Scheme != "magnet" {
-		return "", fmt.Errorf("unexpected scheme %q", u.Scheme)
+	if parsedURI.Scheme != "magnet" {
+		return "", unexpectedSchemeError{parsedURI.Scheme}
 	}
-	q := u.Query()
+	q := parsedURI.Query()
 	displayName := q.Get("dn")
 	if displayName == "" {
-		return "", errors.New("missing 'dn' query parameter")
+		return "", errMissingDNQuery
 	}
 	return displayName, nil
 }

@@ -15,23 +15,23 @@ func timestamp(i uint64) time.Time {
 	return t
 }
 
-func FromTransmission(tx transmission.Torrent) *Torrent {
+func FromTransmission(torrent transmission.Torrent) *Torrent {
 	t := Torrent{
-		ID:         strconv.Itoa(tx.ID),
-		Name:       tx.Name,
-		CreatedAt:  timestamp(tx.AddedDate),
-		Status:     tx.Status,
-		MagnetLink: tx.MagnetLink,
-		TotalSize:  tx.SizeWhenDone,
-		Downloaded: tx.DownloadedEver,
-		Uploaded:   tx.UploadedEver,
+		ID:         strconv.Itoa(torrent.ID),
+		Name:       torrent.Name,
+		CreatedAt:  timestamp(torrent.AddedDate),
+		Status:     torrent.Status,
+		MagnetLink: torrent.MagnetLink,
+		TotalSize:  torrent.SizeWhenDone,
+		Downloaded: torrent.DownloadedEver,
+		Uploaded:   torrent.UploadedEver,
 	}
-	if tx.StartDate != 0 {
-		date := timestamp(tx.StartDate)
+	if torrent.StartDate != 0 {
+		date := timestamp(torrent.StartDate)
 		t.StartedAt = &date
 	}
-	if tx.DoneDate != 0 {
-		date := timestamp(tx.DoneDate)
+	if torrent.DoneDate != 0 {
+		date := timestamp(torrent.DoneDate)
 		t.CompletedAt = &date
 	}
 	return &t
@@ -202,7 +202,7 @@ type torrentLabel struct {
 
 type torrentLabels []torrentLabel
 
-func (t torrentLabels) Diff(id string, existingLabels torrentLabels) (create, delete torrentLabels) {
+func (t torrentLabels) Diff(id string, existingLabels torrentLabels) (additions, subtractions torrentLabels) {
 	current := make(map[string]string, len(t))
 	for _, label := range t {
 		current[label.Key] = label.Value
@@ -211,12 +211,12 @@ func (t torrentLabels) Diff(id string, existingLabels torrentLabels) (create, de
 	for _, label := range t {
 		existing[label.Key] = label.Value
 	}
-	create = make(torrentLabels, 0)
-	delete = make(torrentLabels, 0)
+	additions = make(torrentLabels, 0)
+	subtractions = make(torrentLabels, 0)
 	for k, v1 := range current {
 		v2, ok := existing[k]
 		if !ok || v1 != v2 {
-			create = append(create, torrentLabel{
+			additions = append(additions, torrentLabel{
 				TorrentID: id,
 				Key:       k,
 				Value:     v1,
@@ -225,7 +225,7 @@ func (t torrentLabels) Diff(id string, existingLabels torrentLabels) (create, de
 	}
 	for k := range existing {
 		if _, ok := current[k]; !ok {
-			delete = append(delete, torrentLabel{
+			subtractions = append(subtractions, torrentLabel{
 				TorrentID: id,
 				Key:       k,
 			})
@@ -243,7 +243,7 @@ type torrentCategory struct {
 
 type torrentCategories []torrentCategory
 
-func (t torrentCategories) Diff(id string, existingCategories torrentCategories) (create, delete torrentCategories) {
+func (t torrentCategories) Diff(id string, existingCategories torrentCategories) (additions, subtractions torrentCategories) {
 	current := make(map[string]struct{}, len(t))
 	for _, label := range t {
 		current[label.Category] = struct{}{}
@@ -252,12 +252,12 @@ func (t torrentCategories) Diff(id string, existingCategories torrentCategories)
 	for _, label := range t {
 		existing[label.Category] = struct{}{}
 	}
-	create = make(torrentCategories, 0)
-	delete = make(torrentCategories, 0)
+	additions = make(torrentCategories, 0)
+	subtractions = make(torrentCategories, 0)
 	for k := range current {
 		_, ok := existing[k]
 		if !ok {
-			create = append(create, torrentCategory{
+			additions = append(additions, torrentCategory{
 				TorrentID: id,
 				Category:  k,
 			})
@@ -265,7 +265,7 @@ func (t torrentCategories) Diff(id string, existingCategories torrentCategories)
 	}
 	for k := range existing {
 		if _, ok := current[k]; !ok {
-			delete = append(delete, torrentCategory{
+			subtractions = append(subtractions, torrentCategory{
 				TorrentID: id,
 				Category:  k,
 			})
@@ -276,7 +276,7 @@ func (t torrentCategories) Diff(id string, existingCategories torrentCategories)
 
 func (t *Torrent) Set(ctx context.Context, sess db.Session) error {
 	t.setRawValues()
-	return sess.TxContext(ctx, func(sess db.Session) error {
+	err := sess.TxContext(ctx, func(sess db.Session) error {
 		// Get current torrent record
 		var existing Torrent
 		existingRecord := sess.Collection(torrentTableName).Find("id", t.ID)
@@ -329,6 +329,10 @@ func (t *Torrent) Set(ctx context.Context, sess db.Session) error {
 		}
 		return nil
 	}, nil)
+	if err != nil {
+		return fmt.Errorf("failed db session: %w", err)
+	}
+	return nil
 }
 
 func (t *Torrent) Get(ctx context.Context, sess db.Session) error {

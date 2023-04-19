@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -10,13 +11,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bobcob7/polly-bot/internal/commands"
 	"github.com/bobcob7/polly-bot/internal/config"
-	"github.com/bobcob7/polly-bot/internal/echo"
 	"github.com/bobcob7/polly-bot/internal/mapper"
-	"github.com/bobcob7/polly-bot/internal/ping"
-	"github.com/bobcob7/polly-bot/internal/reader"
 	"github.com/bobcob7/polly-bot/internal/server"
-	"github.com/bobcob7/polly-bot/internal/whoami"
 	"github.com/bobcob7/polly-bot/pkg/discord"
 	"github.com/bobcob7/transmission-rpc"
 	"github.com/golang-migrate/migrate/v4"
@@ -30,13 +28,13 @@ import (
 var showVersion bool
 
 //go:embed migrations/*.sql
-var fs embed.FS
+var migrationFiles embed.FS
 
-func getDatabase(ctx context.Context, cfg config.ConfigDatabase) (db.Session, error) {
+func getDatabase(cfg config.Database) (db.Session, error) {
 	// Connect to DB
 	sess, err := cfg.Session()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed creating db session: %w", err)
 	}
 	// Perform migration
 	// driver, err := postgres.WithInstance(sess, &postgres.Config{})
@@ -44,21 +42,21 @@ func getDatabase(ctx context.Context, cfg config.ConfigDatabase) (db.Session, er
 	// 	"file:///migrations",
 	// 	"postgres", driver)
 	// m.Up() // or m.Step(2) if you want to explicitly set the number of migrations to run
-	d, err := iofs.New(fs, "migrations")
+	driver, err := iofs.New(migrationFiles, "migrations")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed creating migration driver: %w", err)
 	}
 	connString, err := cfg.URL()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed getting configured db url: %w", err)
 	}
-	m, err := migrate.NewWithSourceInstance("iofs", d, connString)
+	m, err := migrate.NewWithSourceInstance("iofs", driver, connString)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed creating new migration source: %w", err)
 	}
 	defer m.Close()
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return nil, err
+	if err := m.Up(); err != nil && errors.Is(err, migrate.ErrNoChange) {
+		return nil, fmt.Errorf("failed to run migration: %w", err)
 	}
 	return sess, nil
 }
@@ -74,7 +72,6 @@ func init() {
 
 func main() {
 	flag.Parse()
-	fmt.Println("0.0.3")
 	cfg := config.New()
 	dec := mapper.NewDecoder(os.LookupEnv, mapper.WithTagDefaulter(strings.ToUpper))
 	if err := dec.Decode(cfg); err != nil {
@@ -99,32 +96,32 @@ func main() {
 	ctx, done := context.WithCancel(context.Background())
 	defer done()
 	// Start database connection
-	pool, err := getDatabase(ctx, cfg.Database)
+	pool, err := getDatabase(cfg.Database)
 	if err != nil {
 		zap.L().Fatal("failed to connect to database", zap.Error(err))
 	}
 	// Start transmission interface
-	tx, err := transmission.New(ctx, cfg.Transmission.Endpoint)
+	transmissionClient, err := transmission.New(ctx, cfg.Transmission.Endpoint)
 	if err != nil {
 		zap.L().Fatal("failed to connect to transmission RPC server", zap.Error(err))
 	}
 	// Start transmission/db interface
-	srv := server.New(cfg, pool, tx)
+	srv := server.New(cfg, pool, transmissionClient)
 	go func() {
 		if err := srv.Run(ctx); err != nil {
 			zap.L().Fatal("failed to startup RPC server", zap.Error(err))
 		}
 	}()
 
-	getAll := reader.NewGetAllCommand(pool)
-	addTorrent := reader.NewAddCommand(pool, tx)
+	getAll := commands.NewGetAllCommand(pool)
+	addTorrent := commands.NewAddCommand(pool, transmissionClient)
 
 	// Start discord interface
 	bot := discord.New(
 		cfg.Discord,
-		&whoami.WhoAmI{},
-		&echo.Echo{},
-		&ping.Ping{},
+		&commands.WhoAmI{},
+		&commands.Echo{},
+		&commands.Ping{},
 		getAll,
 		addTorrent,
 

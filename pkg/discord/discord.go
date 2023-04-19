@@ -25,6 +25,7 @@ func (c Config) Valid() (errs []string) {
 }
 
 type Context struct {
+	//nolint: containedctx
 	context.Context
 	*discordgo.Session
 	*discordgo.InteractionCreate
@@ -70,7 +71,7 @@ type registeredCommand struct {
 	id string
 }
 
-var NotFoundError = errors.New("custom ID not found")
+var ErrNotFound = errors.New("custom ID not found")
 
 func (b *Bot) registerHandles(commands ...BaseCommand) {
 	b.baseHandles = make(map[string]registeredCommand, len(commands))
@@ -168,9 +169,12 @@ func errorResponse(s *discordgo.Session, i *discordgo.Interaction, err error) {
 	}
 }
 
+var errMissingMessageMember = errors.New("missing message member")
+var errMissingToken = errors.New("missing token")
+
 func (b *Bot) Run(ctx context.Context) error {
 	if b.config.Token == "" {
-		return fmt.Errorf("missing token")
+		return errMissingToken
 	}
 	// Create Discord session
 	session, err := discordgo.New("Bot " + b.config.Token)
@@ -190,7 +194,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				}
 				if i.Member == nil || i.Member.User == nil {
 					// Message member doesn't exist
-					errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
+					errorResponse(s, i.Interaction, errMissingMessageMember)
 					return
 				}
 				handleContext.logger = logger.With(zap.String("userID", i.Member.User.ID))
@@ -214,6 +218,7 @@ func (b *Bot) Run(ctx context.Context) error {
 					if err := h.Handle(handleContext); err != nil {
 						logger.Info("Handler error", zap.Error(err))
 						var msg string
+						//nolint: errorlint
 						if pubErr, ok := err.(interface{ Public() string }); ok {
 							msg = pubErr.Public()
 						} else {
@@ -251,7 +256,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				}
 				if i.Member == nil || i.Member.User == nil {
 					// Message member doesn't exist
-					errorResponse(s, i.Interaction, fmt.Errorf("missing message member"))
+					errorResponse(s, i.Interaction, errMissingMessageMember)
 					return
 				}
 				handleContext.logger = logger.With(zap.String("userID", i.Member.User.ID))
@@ -274,6 +279,7 @@ func (b *Bot) Run(ctx context.Context) error {
 					// Get Modal handle
 					if err := handle.HandleModal(handleContext, customID); err != nil {
 						var msg string
+						//nolint: errorlint
 						if pubErr, ok := err.(interface{ Public() string }); ok {
 							msg = pubErr.Public()
 						} else {
@@ -308,11 +314,11 @@ func (b *Bot) Run(ctx context.Context) error {
 	for name, v := range b.baseHandles {
 		command := v.Command()
 		command.Name = name
-		if cmd, err := session.ApplicationCommandCreate(session.State.User.ID, b.config.GuildID, command); err != nil {
+		cmd, err := session.ApplicationCommandCreate(session.State.User.ID, b.config.GuildID, command)
+		if err != nil {
 			return fmt.Errorf("failed to create %s command %w", name, err)
-		} else {
-			v.id = cmd.ID
 		}
+		v.id = cmd.ID
 		// If the command is an advanced command, start it
 		base := reflect.ValueOf(v.BaseCommand)
 		if base.IsValid() {

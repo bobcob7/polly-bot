@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"time"
 
 	"github.com/bobcob7/polly-bot/pkg/discord"
@@ -14,7 +13,7 @@ import (
 
 func New() *Config {
 	return &Config{
-		Transmission: ConfigTransmission{
+		Transmission: Transmission{
 			Endpoint:          "https://transmission.bobcob7.com",
 			DownloadDirectory: "/downloads/complete",
 		},
@@ -22,19 +21,17 @@ func New() *Config {
 }
 
 type Config struct {
-	RSSPeriod     string `map:"RSS_PERIOD"`
-	HistoryLength int    `map:"HISTORY_LENGTH"`
-	Database      ConfigDatabase
-	Discord       discord.Config
-	Transmission  ConfigTransmission
-	GRPC          ConfigGRPC `map:"GRPC"`
+	Database     Database
+	Discord      discord.Config
+	Transmission Transmission
+	GRPC         GRPC `map:"GRPC"`
 }
 
-type ConfigGRPC struct {
+type GRPC struct {
 	Address string
 }
 
-type ConfigDatabase struct {
+type Database struct {
 	Type     string
 	Address  string
 	Username string
@@ -43,7 +40,12 @@ type ConfigDatabase struct {
 	SSLMode  string `map:"SSL_MODE"`
 }
 
-func (c ConfigDatabase) Valid() (errs Errors) {
+const (
+	cockroachDBType = "cockroachdb"
+	postgresDBType  = "postgres"
+)
+
+func (c Database) Valid() (errs MultiError) {
 	if c.Address == "" {
 		errs.Add("Address is required")
 	}
@@ -57,43 +59,56 @@ func (c ConfigDatabase) Valid() (errs Errors) {
 		errs.Add("Type is required")
 	}
 	switch c.Type {
-	case "postgres":
-	case "cockroachdb":
+	case postgresDBType:
+	case cockroachDBType:
 	default:
 		errs.Add(fmt.Sprintln("Unsupported type:", c.Type))
 	}
 	return
 }
 
-func (c ConfigDatabase) Session() (db.Session, error) {
+func (c Database) Session() (sess db.Session, err error) {
 	switch c.Type {
-	case "postgres":
-		return postgresql.Open(postgresql.ConnectionURL{
+	case postgresDBType:
+		sess, err = postgresql.Open(postgresql.ConnectionURL{
 			User:     c.Username,
 			Password: c.Password,
 			Host:     c.Address,
 			Database: c.Database,
 		})
-	case "cockroachdb":
-		return cockroachdb.Open(cockroachdb.ConnectionURL{
+	case cockroachDBType:
+		sess, err = cockroachdb.Open(cockroachdb.ConnectionURL{
 			User:     c.Username,
 			Password: c.Password,
 			Host:     c.Address,
 			Database: c.Database,
 		})
+	default:
+		return nil, unsupportedDatabaseError{Type: c.Type}
 	}
-	return nil, fmt.Errorf("Unsupported type: %s", c.Type)
+	if err != nil {
+		err = fmt.Errorf("failed to open connection: %w", err)
+	}
+	return
 }
 
-func (c ConfigDatabase) URL() (string, error) {
+type unsupportedDatabaseError struct {
+	Type string
+}
+
+func (u unsupportedDatabaseError) Error() string {
+	return fmt.Sprintf("Unsupported type: %s", u.Type)
+}
+
+func (c Database) URL() (string, error) {
 	var schema string
 	switch c.Type {
-	case "postgres":
-		schema = "postgres"
-	case "cockroachdb":
-		schema = "cockroachdb"
+	case postgresDBType:
+		fallthrough
+	case cockroachDBType:
+		schema = c.Type
 	default:
-		return "", fmt.Errorf("Unsupported type: %s", c.Type)
+		return "", unexpectedTypeError{c.Type}
 	}
 	credentials := url.PathEscape(c.Username)
 	if c.Password != "" {
@@ -106,13 +121,13 @@ func (c ConfigDatabase) URL() (string, error) {
 	return connString, nil
 }
 
-type ConfigTransmission struct {
+type Transmission struct {
 	Endpoint          string
 	DownloadDirectory string
-	Scraper           ConfigTransmissionScraper
+	Scraper           TransmissionScraper
 }
 
-func (c ConfigTransmission) Valid() (errs Errors) {
+func (c Transmission) Valid() (errs MultiError) {
 	_, err := url.Parse(c.Endpoint)
 	if err != nil {
 		errs.Add(fmt.Sprintf("Transmission Endpoint is invalid: %v", err))
@@ -123,35 +138,35 @@ func (c ConfigTransmission) Valid() (errs Errors) {
 	return
 }
 
-type ConfigTransmissionScraper struct {
+type TransmissionScraper struct {
 	MinPeriod time.Duration
 	MaxPeriod time.Duration
 }
 
-func (c ConfigTransmissionScraper) Valid() (errs Errors) {
+func (c TransmissionScraper) Valid() (errs MultiError) {
 	return
 }
 
-type Errors struct {
+type MultiError struct {
 	e []string
 }
 
-func (e *Errors) Add(errs ...string) {
+func (e *MultiError) Add(errs ...string) {
 	if e.e == nil {
 		e.e = make([]string, 0)
 	}
 	e.e = append(e.e, errs...)
 }
 
-func (e *Errors) Append(errs Errors) {
+func (e *MultiError) Append(errs MultiError) {
 	e.e = append(e.e, errs.e...)
 }
 
-func (e *Errors) Ok() bool {
+func (e *MultiError) Ok() bool {
 	return len(e.e) == 0
 }
 
-func (e Errors) Error() string {
+func (e MultiError) Error() string {
 	var output string
 	for _, err := range e.e {
 		output += err + "\n"
@@ -159,23 +174,7 @@ func (e Errors) Error() string {
 	return output
 }
 
-var schemaRe = regexp.MustCompile(`^([A-Za-z0-9]+):\/\/.*$`)
-
-func (c Config) Valid() (errs Errors) {
-	if c.RSSPeriod == "" {
-		errs.Add("RSSPeriod is required")
-	} else if rssPeriod, err := time.ParseDuration(c.RSSPeriod); err != nil {
-		errs.Add(fmt.Sprintf("RSSPeriod must be a valid duration: %v", err))
-	} else if rssPeriod < time.Second*5 {
-		errs.Add("RSSPeriod must be at least 5 seconds")
-	} else if rssPeriod > time.Hour*24 {
-		errs.Add("RSSPeriod must be less than 24 hours")
-	}
-	if c.HistoryLength < 10 {
-		errs.Add("HistoryLength must be at least 10")
-	} else if c.HistoryLength > 100000 {
-		errs.Add("HistoryLength must be less than 100000")
-	}
+func (c Config) Valid() (errs MultiError) {
 	errs.Append(c.Transmission.Valid())
 	errs.Add(c.Discord.Valid()...)
 	errs.Append(c.Database.Valid())

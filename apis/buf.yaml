@@ -1,7 +1,4 @@
 version: v1
-name: localhost:8080/bobcob7/polly-bot
-deps:
-  - buf.build/googleapis/googleapis
 breaking:
   use:
     - FILE

@@ -1,4 +1,4 @@
-package reader
+package commands
 
 import (
 	"errors"
@@ -52,23 +52,6 @@ func (p *AddCommand) HasCustomID(customID string) bool {
 	return ok
 }
 
-func selectOptions(options []string) []discordgo.SelectMenuOption {
-	output := make([]discordgo.SelectMenuOption, 0, len(options))
-	for _, category := range options {
-		output = append(output,
-			discordgo.SelectMenuOption{
-				Label:       category,
-				Value:       category,
-				Description: category,
-				// Emoji: discordgo.ComponentEmoji{
-				// 	Name: "🟨",
-				// },
-			},
-		)
-	}
-	return output
-}
-
 var validCategories = []string{
 	"MOVIE",
 	"TV SHOW",
@@ -77,13 +60,15 @@ var validCategories = []string{
 	"SOFTWARE",
 }
 
+var errInvalidMagnetLink = errors.New("invalid magnet link")
+
 func (p *AddCommand) Handle(ctx discord.Context) error {
 	// Get finished input
 	magnetURI := ctx.Interaction.ApplicationCommandData().Options[0].StringValue()
 	// Get display name from URI
 	displayName, err := torrent.MagnetURIDisplayName(magnetURI)
 	if err != nil {
-		return errors.New("Failed parsing magnet link")
+		return errInvalidMagnetLink
 	}
 	logger := ctx.Logger().With(zap.String("displayName", displayName))
 
@@ -95,7 +80,7 @@ func (p *AddCommand) Handle(ctx discord.Context) error {
 		displayName = displayName[:99]
 	}
 
-	return ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	if err := ctx.Session.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
 			Title:    "Add torrent dialog",
@@ -139,20 +124,35 @@ func (p *AddCommand) Handle(ctx discord.Context) error {
 				},
 			},
 		},
-	})
+	}); err != nil {
+		return failedResponseInteractionError{err}
+	}
+	return nil
 }
 
 func (p *AddCommand) HandleModal(ctx discord.Context, id string) error {
 	if _, ok := p.customIDs[id]; !ok {
-		return discord.NotFoundError
+		return discord.ErrNotFound
 	}
 	defer delete(p.customIDs, id)
 	// Add torent with link and friendly name
 	data := ctx.Interaction.ModalSubmitData()
 	logger := ctx.Logger()
-	name := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-	rawCategory := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-	link := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	nameInput, ok := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput)
+	if !ok {
+		return errFailedTypeAssertion
+	}
+	name := nameInput.Value
+	rawCategoryInput, ok := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput)
+	if !ok {
+		return errFailedTypeAssertion
+	}
+	rawCategory := rawCategoryInput.Value
+	linkInput, ok := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput)
+	if !ok {
+		return errFailedTypeAssertion
+	}
+	link := linkInput.Value
 
 	meta := &models.TorrentMetadata{
 		FriendlyName: name,
@@ -169,7 +169,7 @@ func (p *AddCommand) HandleModal(ctx discord.Context, id string) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("Unknown category: %q", rawCategory)
+			return unexpectedCategoryError{rawCategory}
 		}
 		opts = transmission.DownloadSubDirOption(strings.ToLower(category))
 		meta.Categories = []string{category}
@@ -177,27 +177,33 @@ func (p *AddCommand) HandleModal(ctx discord.Context, id string) error {
 	// Adding magnet link
 	torrentID, err := p.tx.AddMagnetLink(ctx, link, opts)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to add magnet link: %w", err)
 	}
 	// Scrape new torrent
 	torrents, err := p.tx.GetTorrents(ctx, torrentID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get torrents from db: %w", err)
 	}
 	logger.Debug("scraped torrent from transmission", zap.Int("id", torrentID))
 	if len(torrents) != 1 {
-		return fmt.Errorf("Scraped %d torrents intead of 1", len(torrents))
+		return unexpectedNumberOfTorrentsError{
+			want: 1,
+			got:  len(torrents),
+		}
 	}
 	newTorrent := models.FromTransmission(torrents[0])
 	newTorrent.TorrentMetadata = meta
 	if err := newTorrent.Set(ctx, p.sess); err != nil {
-		return err
+		return fmt.Errorf("failed to set in db: %w", err)
 	}
-	return ctx.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
+	if err := ctx.InteractionRespond(ctx.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: "Thank you sharing",
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
-	})
+	}); err != nil {
+		return failedResponseInteractionError{err}
+	}
+	return nil
 }
