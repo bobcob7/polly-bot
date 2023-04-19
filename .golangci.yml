@@ -30,7 +30,6 @@ linters:
     - gocheckcompilerdirectives
     - goconst
     - gocritic
-    - gocyclo
     - godot
     - godox
     - goerr113
